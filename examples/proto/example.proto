@@ -1,0 +1,33 @@
+
+syntax = "proto3";
+
+// import "protoc-gen-goor/options/annotations.proto";
+
+package goor.examples;
+
+option go_package = "github.com/jaym/go-orleans/examples";
+
+/*
+message ExampleGrainState { int64 count = 1; }
+
+message AddRequest { int64 amount = 1; }
+message AddResponse { int64 current_count = 1; }
+message GetRequest {}
+message GetResponse { int64 current_count = 1; }
+
+service ExampleGrain {
+  option (goor.gen.annotations.state_selector) = "ExampleGrainState";
+  rpc Add(AddRequest) returns (AddResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+}
+*/
+
+message PublishMessageRequest { string msg = 1; }
+message PublishMessageResponse { string foobar = 1; }
+message SubscribeRequest {}
+message ChirpMessage { string msg = 1; }
+
+service ChirperGrain {
+  rpc PublishMessage(PublishMessageRequest) returns (PublishMessageResponse);
+  rpc Message(SubscribeRequest) returns (stream ChirpMessage);
+}
