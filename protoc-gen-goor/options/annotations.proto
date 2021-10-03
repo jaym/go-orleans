@@ -1,0 +1,12 @@
+
+syntax = "proto3";
+
+import "google/protobuf/descriptor.proto";
+
+package goor.gen.annotations;
+
+option go_package = "github.com/jaym/go-orleans/protoc-gen-goor/options";
+
+message GrainOptions {}
+
+extend google.protobuf.ServiceOptions { string state_selector = 73000; }

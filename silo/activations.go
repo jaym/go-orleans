@@ -156,7 +156,7 @@ func (g *GrainActivation) Start() {
 				if err != nil {
 					panic(err)
 				}
-				err = o.Handler(activation, ctx, g.Address, func(in interface{}) error {
+				err = o.Handler(activation, ctx, func(in interface{}) error {
 					return proto.Unmarshal(req.In, in.(proto.Message))
 				})
 				if err != nil {

@@ -47,7 +47,7 @@ type ObservableDesc struct {
 
 type ActivationHandler func(activator interface{}, ctx context.Context, siloClient SiloClient, o ObserverManager, address Address) (Addressable, error)
 type MethodHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) (interface{}, error)
-type ObservableHandler func(srv interface{}, ctx context.Context, observerAddress Address, dec func(interface{}) error) error
+type ObservableHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) error
 type NotifyObserverHandler func(m ObserverManager, ctx context.Context, o []RegisteredObserver) error
 
 type Registrar interface {
@@ -202,7 +202,7 @@ func (s *siloClientImpl) AckRegisterObserver(ctx context.Context, receiver Addre
 	}
 
 	err := f.Resolve(RegisterObserverResp{
-		err: dataErr,
+		Err: dataErr,
 	})
 	s.mutex.Lock()
 	delete(s.futures, uuid)

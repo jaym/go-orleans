@@ -27,7 +27,7 @@ message PublishMessageResponse { string foobar = 1; }
 message SubscribeRequest {}
 message ChirpMessage { string msg = 1; }
 
-service ChirperGrain {
+service Chirper {
   rpc PublishMessage(PublishMessageRequest) returns (PublishMessageResponse);
   rpc Message(SubscribeRequest) returns (stream ChirpMessage);
 }

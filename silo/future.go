@@ -62,8 +62,8 @@ type RegisterObserverFuture interface {
 }
 
 type RegisterObserverResp struct {
-	data []byte
-	err  []byte
+	Data []byte
+	Err  []byte
 }
 
 type registerObserverFuture struct {
