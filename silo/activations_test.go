@@ -21,10 +21,16 @@ func (*ChirperGrainActivatorTestImpl) Activate(ctx context.Context, address silo
 		services: services,
 	}
 
+	coreServices := services.CoreGrainServices()
+
+	coreServices.TimerService().RegisterTimer("hello", time.Second, func() {
+		fmt.Println("Got timer")
+	})
+
 	if address.ID == "u2" {
 		g1Address := address
 		g1Address.ID = "u1"
-		g1 := examples.GetChirperGrain(services.SiloClient(), g1Address)
+		g1 := examples.GetChirperGrain(services.CoreGrainServices().SiloClient(), g1Address)
 		g1.ObserveMessage(ctx, g, &examples.SubscribeRequest{})
 	}
 	return g, nil
@@ -105,6 +111,14 @@ func TestItAll(t *testing.T) {
 
 	chirperGrain1Ref := examples.GetChirperGrain(s.Client(), g1Address)
 	chirperGrain2Ref := examples.GetChirperGrain(s.Client(), g2Address)
+	address, err := examples.CreateChirperGrainMessageObserver(context.Background(), s,
+		func(ctx context.Context, req *examples.ChirpMessage) error {
+			fmt.Printf("anonymous grain got notification: %q\n", req.Msg)
+			return nil
+		})
+	require.NoError(t, err)
+	err = chirperGrain1Ref.ObserveMessage(context.Background(), address, &examples.SubscribeRequest{})
+	require.NoError(t, err)
 
 	resp, err := chirperGrain2Ref.PublishMessage(silo.WithAddressContext(context.Background(), silo.Address{
 		Location: "local",

@@ -45,7 +45,7 @@ type ObservableDesc struct {
 	NotifyHandler NotifyObserverHandler
 }
 
-type ActivationHandler func(activator interface{}, ctx context.Context, siloClient SiloClient, o ObserverManager, address Address) (Addressable, error)
+type ActivationHandler func(activator interface{}, ctx context.Context, coreServices CoreGrainServices, o ObserverManager, address Address) (Addressable, error)
 type MethodHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) (interface{}, error)
 type ObservableHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) error
 type NotifyObserverHandler func(m ObserverManager, ctx context.Context, o []RegisteredObserver) error
@@ -58,16 +58,29 @@ type Registrar interface {
 type Silo struct {
 	localGrainManager GrainActivationManager
 	client            *siloClientImpl
+	timerService      TimerService
 }
 
 func NewSilo(registrar Registrar) *Silo {
 	s := &Silo{}
+	// TODO: do something a little more sensible. With the generic
+	// grain, it is expected to pass in an activator for each
+	// activation. Setting it to nil is will cause a panic with
+	// no information on what went wrong
+	registrar.Register(&grain_GrainDesc, nil)
 	s.localGrainManager = NewGrainActivationManager(registrar, s)
 	s.client = &siloClientImpl{
 		futures:                 make(map[string]InvokeMethodFuture),
 		registerObserverFutures: make(map[string]RegisterObserverFuture),
 		grainManager:            s.localGrainManager,
 	}
+	s.timerService = newTimerServiceImpl(func(grainAddr Address, name string) {
+		s.localGrainManager.EnqueueTimerTrigger(TimerTriggerNotification{
+			Receiver: grainAddr,
+			Name:     name,
+		})
+	})
+	s.timerService.Start()
 	return s
 }
 
@@ -75,7 +88,24 @@ func (s *Silo) Client() SiloClient {
 	return s.client
 }
 
+func (s *Silo) TimerService() TimerService {
+	return s.timerService
+}
+
 func (s *Silo) Register(desc *GrainDescription, activator interface{}) {
+}
+
+func (s *Silo) CreateGrain(activator GenericGrainActivator) (Address, error) {
+	address := Address{
+		Location:  "local",
+		GrainType: "Grain",
+		ID:        ksuid.New().String(),
+	}
+	err := s.localGrainManager.ActivateGrain(ActivateGrainRequest{
+		Address:   address,
+		Activator: activator,
+	})
+	return address, err
 }
 
 type SiloClient interface {
@@ -92,8 +122,7 @@ type siloClientImpl struct {
 	mutex                   sync.Mutex
 	futures                 map[string]InvokeMethodFuture
 	registerObserverFutures map[string]RegisterObserverFuture
-
-	grainManager GrainActivationManager
+	grainManager            GrainActivationManager
 }
 
 func (s *siloClientImpl) SendResponse(ctx context.Context, receiver Address, uuid string, out proto.Message) error {

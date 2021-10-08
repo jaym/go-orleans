@@ -8,18 +8,18 @@ import (
 )
 
 type ChirperGrainServices interface {
-	SiloClient() silo.SiloClient
+	CoreGrainServices() silo.CoreGrainServices
 	NotifyMessageObservers(ctx context.Context, observers []silo.RegisteredObserver, val *ChirpMessage) error
 	ListMessageObservers(ctx context.Context) ([]silo.RegisteredObserver, error)
 }
 
 type impl_ChirperGrainServices struct {
 	observerManager silo.ObserverManager
-	siloClient      silo.SiloClient
+	coreServices    silo.CoreGrainServices
 }
 
-func (m *impl_ChirperGrainServices) SiloClient() silo.SiloClient {
-	return m.siloClient
+func (m *impl_ChirperGrainServices) CoreGrainServices() silo.CoreGrainServices {
+	return m.coreServices
 }
 
 func (m *impl_ChirperGrainServices) NotifyMessageObservers(ctx context.Context, observers []silo.RegisteredObserver, val *ChirpMessage) error {
@@ -43,15 +43,45 @@ type ChirperGrain interface {
 	PublishMessage(ctx context.Context, req *PublishMessageRequest) (*PublishMessageResponse, error)
 }
 
-type ChirperGrainMessageObserverRef interface {
+type ChirperGrainMessageObserver interface {
 	silo.Addressable
 	OnNotifyMessage(ctx context.Context, req *ChirpMessage) error
+}
+
+func CreateChirperGrainMessageObserver(ctx context.Context, s *silo.Silo, f func(ctx context.Context, req *ChirpMessage) error) (silo.Addressable, error) {
+	address, err := s.CreateGrain(&_Chirper_Message_ObserverActivator{
+		f: f,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return address, nil
+}
+
+type impl_ChirperGrainMessageObserver struct {
+	silo.Address
+	f func(ctx context.Context, req *ChirpMessage) error
+}
+
+func (g *impl_ChirperGrainMessageObserver) OnNotifyMessage(ctx context.Context, req *ChirpMessage) error {
+	return g.f(ctx, req)
+}
+
+type _Chirper_Message_ObserverActivator struct {
+	f func(ctx context.Context, req *ChirpMessage) error
+}
+
+func (a *_Chirper_Message_ObserverActivator) Activate(ctx context.Context, address silo.Address) (silo.Addressable, error) {
+	return &impl_ChirperGrainMessageObserver{
+		Address: address,
+		f:       a.f,
+	}, nil
 }
 
 type ChirperGrainRef interface {
 	silo.Addressable
 	ChirperGrain
-	ObserveMessage(ctx context.Context, observer ChirperGrainMessageObserverRef, req *SubscribeRequest) error
+	ObserveMessage(ctx context.Context, observer silo.Addressable, req *SubscribeRequest) error
 }
 
 var ChirperGrain_GrainDesc = silo.GrainDescription{
@@ -73,10 +103,10 @@ var ChirperGrain_GrainDesc = silo.GrainDescription{
 	},
 }
 
-func _ChirperGrain_Activate(activator interface{}, ctx context.Context, siloClient silo.SiloClient, observerManager silo.ObserverManager, address silo.Address) (silo.Addressable, error) {
+func _ChirperGrain_Activate(activator interface{}, ctx context.Context, coreServices silo.CoreGrainServices, observerManager silo.ObserverManager, address silo.Address) (silo.Addressable, error) {
 	grainServices := &impl_ChirperGrainServices{
 		observerManager: observerManager,
-		siloClient:      siloClient,
+		coreServices:    coreServices,
 	}
 	return activator.(ChirperGrainActivator).Activate(ctx, address, grainServices)
 }
@@ -96,7 +126,7 @@ func _ChirperGrain_Message_ObserverHandler(srv interface{}, ctx context.Context,
 		return err
 	}
 
-	return srv.(ChirperGrainMessageObserverRef).OnNotifyMessage(ctx, in)
+	return srv.(ChirperGrainMessageObserver).OnNotifyMessage(ctx, in)
 }
 
 type _grainClient_ChirperGrain struct {
@@ -123,7 +153,7 @@ func (c *_grainClient_ChirperGrain) PublishMessage(ctx context.Context, req *Pub
 	}
 	return out, nil
 }
-func (c *_grainClient_ChirperGrain) ObserveMessage(ctx context.Context, observer ChirperGrainMessageObserverRef, req *SubscribeRequest) error {
+func (c *_grainClient_ChirperGrain) ObserveMessage(ctx context.Context, observer silo.Addressable, req *SubscribeRequest) error {
 	f := c.siloClient.RegisterObserver(ctx, observer.GetAddress(), c.GetAddress(), ChirperGrain_GrainDesc.Observables[0].Name, req)
 	resp, err := f.Await(ctx)
 	if err != nil {
