@@ -14,9 +14,13 @@ type InvokeMethodFuture interface {
 
 type InvokeMethodResp struct {
 	data []byte
+	err  error
 }
 
 func (resp *InvokeMethodResp) Get(out interface{}) error {
+	if resp.err != nil {
+		return resp.err
+	}
 	return proto.Unmarshal(resp.data, out.(proto.Message))
 }
 

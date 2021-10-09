@@ -24,7 +24,7 @@ func (*ChirperGrainActivatorTestImpl) Activate(ctx context.Context, address silo
 	coreServices := services.CoreGrainServices()
 
 	coreServices.TimerService().RegisterTimer("hello", time.Second, func() {
-		fmt.Println("Got timer")
+		fmt.Printf("Got timer: %v\n", g.Address)
 	})
 
 	if address.ID == "u2" {
@@ -62,6 +62,10 @@ func (g *ChirperGrainImpl) OnNotifyMessage(ctx context.Context, req *examples.Ch
 	return nil
 }
 
+func (g *ChirperGrainImpl) Deactivate(ctx context.Context) {
+	fmt.Printf("Deactivating %v\n", g.Address)
+}
+
 type registrarEntry struct {
 	Description *silo.GrainDescription
 	Impl        interface{}
@@ -95,6 +99,22 @@ func TestItAll(t *testing.T) {
 	s := silo.NewSilo(registrar)
 	in := &examples.PublishMessageRequest{
 		Msg: "world",
+	}
+
+	for i := 0; i < 10; i++ {
+		a := silo.Address{
+			Location:  "local",
+			GrainType: "ChirperGrain",
+			ID:        fmt.Sprintf("g%d", i),
+		}
+		ref := examples.GetChirperGrain(s.Client(), a)
+		fmt.Printf("Calling g%d\n", i)
+		_, err := ref.PublishMessage(silo.WithAddressContext(context.Background(), silo.Address{
+			Location: "local",
+		}), in)
+		if err != nil {
+			fmt.Printf("%v\n", err)
+		}
 	}
 
 	g1Address := silo.Address{

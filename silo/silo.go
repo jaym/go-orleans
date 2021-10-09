@@ -178,7 +178,7 @@ func (s *siloClientImpl) InvokeMethod(ctx context.Context, toAddress Address, gr
 		s.mutex.Lock()
 		delete(s.futures, id)
 		s.mutex.Unlock()
-		panic(err)
+		f.Resolve(InvokeMethodResp{err: err})
 	}
 	return f
 }

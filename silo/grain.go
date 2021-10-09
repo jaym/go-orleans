@@ -32,3 +32,11 @@ func (c *coreGrainService) TimerService() GrainTimerService {
 func (c *coreGrainService) SiloClient() SiloClient {
 	return c.siloClient
 }
+
+type HasCanEvict interface {
+	CanEvict(ctx context.Context) bool
+}
+
+type HasDeactivate interface {
+	Deactivate(ctx context.Context)
+}

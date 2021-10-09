@@ -16,11 +16,16 @@ type GrainActivationManager interface {
 	EnqueueRegisterObserverRequest(RegisterObserverRequest) error
 	EnqueueObserverNotification(ObserverNotification) error
 	EnqueueTimerTrigger(TimerTriggerNotification) error
+	EnqueueEvictGrain(EvictGrainRequest) error
 }
 
 type ActivateGrainRequest struct {
 	Address   Address
 	Activator GenericGrainActivator
+}
+
+type EvictGrainRequest struct {
+	Address Address
 }
 
 type InvokeMethodRequest struct {
@@ -60,6 +65,7 @@ const (
 	registerObserver
 	notifyObserver
 	triggerTimer
+	evictGrain
 	stop
 )
 
@@ -91,16 +97,22 @@ type grainActivationMessage struct {
 	registerObserver *grainActivationRegisterObserver
 	notifyObserver   *grainActivationNotifyObserver
 	triggerTimer     *grainActivationTriggerTimer
+	evictGrain       *grainActivationEvict
+}
+
+type grainActivationEvict struct {
 }
 
 type GrainActivation struct {
-	Address      Address
-	Description  *GrainDescription
-	impl         interface{}
-	inbox        chan grainActivationMessage
-	siloClient   SiloClient
-	registrar    Registrar
-	timerService TimerService
+	Address            Address
+	Description        *GrainDescription
+	impl               interface{}
+	inbox              chan grainActivationMessage
+	siloClient         SiloClient
+	registrar          Registrar
+	timerService       TimerService
+	resourceManager    *resourceManager
+	deactivateCallback func(Address)
 }
 
 func (g *GrainActivation) findMethodDesc(name string) (*MethodDesc, error) {
@@ -132,90 +144,137 @@ func (g *GrainActivation) findObserableDesc(grainType, name string) (*Observable
 }
 
 func (g *GrainActivation) Start() {
+	g.start()
+}
+
+func (g *GrainActivation) start() {
 	go func() {
-		ctx := WithAddressContext(context.Background(), g.Address)
-		observerManager := NewInmemoryObserverManager(g.Address, g.siloClient)
-
-		grainTimerService := &grainTimerServiceImpl{
-			grainAddress: g.Address,
-			timerService: g.timerService,
-			timers:       map[string]func(){},
-		}
-
-		coreServices := &coreGrainService{
-			grainTimerServices: grainTimerService,
-			siloClient:         g.siloClient,
-		}
-
-		activation, err := g.Description.Activation.Handler(g.impl, ctx, coreServices, observerManager, g.Address)
-		if err != nil {
-			panic(err)
-		}
-	LOOP:
-		for msg := range g.inbox {
-			switch msg.messageType {
-			case invokeMethod:
-				req := msg.invokeMethod.req
-				m, err := g.findMethodDesc(req.Method)
-				if err != nil {
-					// encode error
-					panic(err)
-				}
-				resp, err := m.Handler(activation, ctx, func(in interface{}) error {
-					return proto.Unmarshal(req.in, in.(proto.Message))
-				})
-				if err != nil {
-					// encode error
-					panic(err)
-				}
-				err = g.siloClient.SendResponse(ctx, req.Sender, req.UUID, resp.(proto.Message))
-				if err != nil {
-					// encode error
-					panic(err)
-				}
-			case registerObserver:
-				req := msg.registerObserver.req
-				o, err := g.findObserableDesc("", req.Name)
-				if err != nil {
-					panic(err)
-				}
-				_, err = observerManager.Add(ctx, o.Name, req.Observer, req.In)
-				g.siloClient.AckRegisterObserver(ctx, req.Observer, req.UUID, err)
-			case notifyObserver:
-				req := msg.notifyObserver
-				o, err := g.findObserableDesc(req.ObservableType, req.Name)
-				if err != nil {
-					panic(err)
-				}
-				err = o.Handler(activation, ctx, func(in interface{}) error {
-					return proto.Unmarshal(req.In, in.(proto.Message))
-				})
-				if err != nil {
-					fmt.Printf("err: %v\n", err)
-				}
-			case triggerTimer:
-				req := msg.triggerTimer
-				grainTimerService.Trigger(req.Name)
-			case stop:
-				break LOOP
-			}
-		}
+		g.loop()
+		g.deactivateCallback(g.Address)
 	}()
 }
 
+func (g *GrainActivation) loop() {
+	ctx := WithAddressContext(context.Background(), g.Address)
+	observerManager := NewInmemoryObserverManager(g.Address, g.siloClient)
+
+	grainTimerService := &grainTimerServiceImpl{
+		grainAddress: g.Address,
+		timerService: g.timerService,
+		timers:       map[string]func(){},
+	}
+
+	coreServices := &coreGrainService{
+		grainTimerServices: grainTimerService,
+		siloClient:         g.siloClient,
+	}
+
+	if err := g.resourceManager.Touch(g.Address); err != nil {
+		return
+	}
+
+	activation, err := g.Description.Activation.Handler(g.impl, ctx, coreServices, observerManager, g.Address)
+	if err != nil {
+		panic(err)
+	}
+LOOP:
+	for msg := range g.inbox {
+		switch msg.messageType {
+		case invokeMethod:
+			g.resourceManager.Touch(g.Address)
+			req := msg.invokeMethod.req
+			m, err := g.findMethodDesc(req.Method)
+			if err != nil {
+				// encode error
+				panic(err)
+			}
+			resp, err := m.Handler(activation, ctx, func(in interface{}) error {
+				return proto.Unmarshal(req.in, in.(proto.Message))
+			})
+			if err != nil {
+				// encode error
+				panic(err)
+			}
+			err = g.siloClient.SendResponse(ctx, req.Sender, req.UUID, resp.(proto.Message))
+			if err != nil {
+				// encode error
+				panic(err)
+			}
+		case registerObserver:
+			g.resourceManager.Touch(g.Address)
+
+			req := msg.registerObserver.req
+			o, err := g.findObserableDesc("", req.Name)
+			if err != nil {
+				panic(err)
+			}
+			_, err = observerManager.Add(ctx, o.Name, req.Observer, req.In)
+			g.siloClient.AckRegisterObserver(ctx, req.Observer, req.UUID, err)
+		case notifyObserver:
+			g.resourceManager.Touch(g.Address)
+
+			req := msg.notifyObserver
+			o, err := g.findObserableDesc(req.ObservableType, req.Name)
+			if err != nil {
+				panic(err)
+			}
+			err = o.Handler(activation, ctx, func(in interface{}) error {
+				return proto.Unmarshal(req.In, in.(proto.Message))
+			})
+			if err != nil {
+				fmt.Printf("err: %v\n", err)
+			}
+		case triggerTimer:
+			req := msg.triggerTimer
+			grainTimerService.Trigger(req.Name)
+		case evictGrain:
+			canEvict := true
+			if hasCanEvict, ok := activation.(HasCanEvict); ok {
+				canEvict = hasCanEvict.CanEvict(ctx)
+			}
+			if canEvict {
+				if hasDeactivate, ok := activation.(HasDeactivate); ok {
+					hasDeactivate.Deactivate(ctx)
+				}
+				break LOOP
+			}
+		case stop:
+			break LOOP
+		}
+	}
+}
+
 type GrainActivationManagerImpl struct {
-	lock             sync.Mutex
-	grainActivations map[Address]*GrainActivation
-	registrar        Registrar
-	silo             *Silo
+	lock               sync.Mutex
+	grainActivations   map[Address]*GrainActivation
+	registrar          Registrar
+	silo               *Silo
+	resourceManager    *resourceManager
+	deactivateCallback func(Address)
 }
 
 func NewGrainActivationManager(registrar Registrar, silo *Silo) *GrainActivationManagerImpl {
-	return &GrainActivationManagerImpl{
+	m := &GrainActivationManagerImpl{
 		grainActivations: make(map[Address]*GrainActivation),
 		registrar:        registrar,
 		silo:             silo,
 	}
+	resourceManager := newResourceManager(8, func(addresses []Address) {
+		for _, a := range addresses {
+			m.EnqueueEvictGrain(EvictGrainRequest{
+				Address: a,
+			})
+		}
+	})
+	resourceManager.Start()
+	m.resourceManager = resourceManager
+	m.deactivateCallback = func(a Address) {
+		m.resourceManager.Remove(a)
+		m.lock.Lock()
+		defer m.lock.Unlock()
+		delete(m.grainActivations, a)
+	}
+	return m
 }
 
 func (m *GrainActivationManagerImpl) activateGrainWithDefaultActivator(address Address) (*GrainActivation, error) {
@@ -223,35 +282,38 @@ func (m *GrainActivationManagerImpl) activateGrainWithDefaultActivator(address A
 	if err != nil {
 		return nil, err
 	}
+
 	activation := &GrainActivation{
-		Address:      address,
-		Description:  grainDesc,
-		impl:         activator,
-		inbox:        make(chan grainActivationMessage, 8),
-		siloClient:   m.silo.Client(),
-		registrar:    m.registrar,
-		timerService: m.silo.TimerService(),
+		Address:            address,
+		Description:        grainDesc,
+		impl:               activator,
+		inbox:              make(chan grainActivationMessage, 8),
+		siloClient:         m.silo.Client(),
+		registrar:          m.registrar,
+		timerService:       m.silo.TimerService(),
+		resourceManager:    m.resourceManager,
+		deactivateCallback: m.deactivateCallback,
 	}
 	activation.Start()
 	return activation, nil
 }
 
 func (m *GrainActivationManagerImpl) activateGrainWithActivator(address Address, activator interface{}) (*GrainActivation, error) {
-	if activator == nil {
-		panic("WHAT")
-	}
 	grainDesc, _, err := m.registrar.Lookup(address.GrainType)
 	if err != nil {
 		return nil, err
 	}
+
 	activation := &GrainActivation{
-		Address:      address,
-		Description:  grainDesc,
-		impl:         activator,
-		inbox:        make(chan grainActivationMessage, 8),
-		siloClient:   m.silo.Client(),
-		registrar:    m.registrar,
-		timerService: m.silo.TimerService(),
+		Address:            address,
+		Description:        grainDesc,
+		impl:               activator,
+		inbox:              make(chan grainActivationMessage, 8),
+		siloClient:         m.silo.Client(),
+		registrar:          m.registrar,
+		timerService:       m.silo.TimerService(),
+		resourceManager:    m.resourceManager,
+		deactivateCallback: m.deactivateCallback,
 	}
 	activation.Start()
 	return activation, nil
@@ -362,6 +424,24 @@ func (m *GrainActivationManagerImpl) EnqueueTimerTrigger(req TimerTriggerNotific
 			Receiver: req.Receiver,
 			Name:     req.Name,
 		},
+	}
+	select {
+	case activation.inbox <- msg:
+	default:
+		return errors.New("inbox full")
+	}
+	return nil
+}
+
+func (m *GrainActivationManagerImpl) EnqueueEvictGrain(req EvictGrainRequest) error {
+	activation, err := m.getActivation(req.Address, false)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Evicting grain %s\n", req.Address.ID)
+	msg := grainActivationMessage{
+		messageType: evictGrain,
+		evictGrain:  &grainActivationEvict{},
 	}
 	select {
 	case activation.inbox <- msg:
