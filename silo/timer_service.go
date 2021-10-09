@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/go-logr/logr"
 )
 
 var ErrTimerAlreadyRegistered = errors.New("timer already registered")
@@ -58,6 +60,7 @@ type timerServiceControlMessage struct {
 
 type timerServiceImpl struct {
 	grainTimerTrigger GrainTimerTrigger
+	log               logr.Logger
 
 	nowProvider func() time.Time
 	ctlChan     chan timerServiceControlMessage
@@ -69,12 +72,13 @@ type timerServiceImpl struct {
 
 type GrainTimerTrigger func(grainAddr Address, name string)
 
-func newTimerServiceImpl(grainTimerTrigger GrainTimerTrigger) TimerService {
+func newTimerServiceImpl(log logr.Logger, grainTimerTrigger GrainTimerTrigger) TimerService {
 	ctlChan := make(chan timerServiceControlMessage)
 	queue := make(timerEntryHeap, 0, 512)
 	heap.Init(&queue)
 	s := &timerServiceImpl{
 		grainTimerTrigger: grainTimerTrigger,
+		log:               log,
 		nowProvider:       time.Now,
 		ctlChan:           ctlChan,
 		stopChan:          make(chan struct{}),
@@ -85,11 +89,13 @@ func newTimerServiceImpl(grainTimerTrigger GrainTimerTrigger) TimerService {
 }
 
 func (s *timerServiceImpl) Start() {
+	s.log.V(3).Info("starting timer service")
 	s.start()
 }
 
 func (s *timerServiceImpl) start() {
 	go func() {
+		s.log.V(3).Info("started timer service")
 		ticker := time.NewTicker(1 * time.Second)
 
 	LOOP:
@@ -106,26 +112,34 @@ func (s *timerServiceImpl) start() {
 					msg.cancel.resp <- canceled
 					close(msg.cancel.resp)
 				case timerServiceCtlMsgTypeStop:
+					s.log.V(1).Info("stopping background thread")
 					break LOOP
+				default:
+					s.log.V(0).Info("unknown ctl chan message", "type", msg.msgType)
 				}
 			case <-ticker.C:
 				now := s.nowProvider()
 				for {
 					if len(*s.queue) == 0 {
+						s.log.V(5).Info("nothing to trigger: none available")
 						break
 					}
 
 					if (*s.queue)[0].triggerAt.After(now) {
+						s.log.V(5).Info("nothing to trigger: none ready")
 						break
 					}
 					v := heap.Pop(s.queue).(*timerEntry)
 					if !v.canceled {
+						s.log.V(4).Info("triggering grain", "address", v.grainAddr, "triggerName", v.name)
 						s.grainTimerTrigger(v.grainAddr, v.name)
 						if v.repeat {
+							s.log.V(4).Info("reregistering timer", "address", v.grainAddr, "triggerName", v.name)
 							v.triggerAt = s.nowProvider().Add(v.d)
 							heap.Push(s.queue, v)
 							continue
 						}
+						s.log.V(4).Info("removing timer", "address", v.grainAddr, "triggerName", v.name)
 						entryName := s.entryName(v.grainAddr.GrainType, v.grainAddr.ID, v.name)
 						delete(s.timerEntries, entryName)
 					}
@@ -192,6 +206,8 @@ func (s *timerServiceImpl) RegisterTicker(addr Address, name string, d time.Dura
 }
 
 func (s *timerServiceImpl) register(addr Address, name string, d time.Duration, repeat bool) error {
+	s.log.V(4).Info("processing register", "address", addr, "name", name, "duration", d, "repeat", repeat)
+
 	entryName := s.entryName(addr.GrainType, addr.ID, name)
 	if e, ok := s.timerEntries[entryName]; ok {
 		if !e.canceled {
@@ -209,6 +225,8 @@ func (s *timerServiceImpl) register(addr Address, name string, d time.Duration, 
 }
 
 func (s *timerServiceImpl) cancel(addr Address, name string) bool {
+	s.log.V(4).Info("processing cancel", "address", addr, "name", name)
+
 	entryName := s.entryName(addr.GrainType, addr.ID, name)
 	entry, ok := s.timerEntries[entryName]
 

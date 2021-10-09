@@ -522,8 +522,8 @@ func writeGrainClientRegisterObserver(g *protogen.GeneratedFile, observableIdx i
 	g.P("return err")
 	g.P("}")
 
-	g.P("if len(resp.Err) > 0 {")
-	g.P("return ", g.QualifiedGoIdent(fmtPackage.Ident("Errorf")), "(\"%s\", string(resp.Err))")
+	g.P("if resp.Err != nil {")
+	g.P("return resp.Err")
 	g.P("}")
 
 	g.P("return nil")

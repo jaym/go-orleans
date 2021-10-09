@@ -3,7 +3,6 @@ package examples
 
 import (
 	context "context"
-	fmt "fmt"
 	silo "github.com/jaym/go-orleans/silo"
 )
 
@@ -159,8 +158,8 @@ func (c *_grainClient_ChirperGrain) ObserveMessage(ctx context.Context, observer
 	if err != nil {
 		return err
 	}
-	if len(resp.Err) > 0 {
-		return fmt.Errorf("%s", string(resp.Err))
+	if resp.Err != nil {
+		return resp.Err
 	}
 	return nil
 }

@@ -3,10 +3,13 @@ package silo
 import (
 	"container/heap"
 	"context"
+	stdlog "log"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/go-logr/stdr"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -99,7 +102,8 @@ func TestTimerService(t *testing.T) {
 		return now
 	}
 	trig := &triggerable{wg: &sync.WaitGroup{}}
-	s := newTimerServiceImpl(trig.TriggerGrainTimer).(*timerServiceImpl)
+	log := stdr.NewWithOptions(stdlog.New(os.Stderr, "", stdlog.LstdFlags), stdr.Options{LogCaller: stdr.All})
+	s := newTimerServiceImpl(log, trig.TriggerGrainTimer).(*timerServiceImpl)
 	s.nowProvider = nowProvider
 	s.Start()
 

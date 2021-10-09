@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	stdlog "log"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/go-logr/stdr"
 	examples "github.com/jaym/go-orleans/examples/proto"
 	"github.com/jaym/go-orleans/silo"
 	"github.com/stretchr/testify/require"
@@ -95,8 +98,9 @@ func TestItAll(t *testing.T) {
 	}
 	impl := &ChirperGrainActivatorTestImpl{}
 	examples.RegisterChirperGrainActivator(registrar, impl)
-
-	s := silo.NewSilo(registrar)
+	stdr.SetVerbosity(4)
+	log := stdr.NewWithOptions(stdlog.New(os.Stderr, "", stdlog.LstdFlags), stdr.Options{LogCaller: stdr.All})
+	s := silo.NewSilo(log, registrar)
 	in := &examples.PublishMessageRequest{
 		Msg: "world",
 	}

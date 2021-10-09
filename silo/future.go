@@ -67,7 +67,7 @@ type RegisterObserverFuture interface {
 
 type RegisterObserverResp struct {
 	Data []byte
-	Err  []byte
+	Err  error
 }
 
 type registerObserverFuture struct {
