@@ -2,11 +2,12 @@ package silo
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/jaym/go-orleans/grain"
+	grainservices "github.com/jaym/go-orleans/grain/services"
 	"github.com/segmentio/ksuid"
 	"google.golang.org/protobuf/proto"
 )
@@ -16,24 +17,6 @@ type GrainDescription struct {
 	Activation  ActivationDesc
 	Methods     []MethodDesc
 	Observables []ObservableDesc
-}
-
-type Address struct {
-	Location  string
-	GrainType string
-	ID        string
-}
-
-func (m Address) GetAddress() Address {
-	return m
-}
-
-func (a Address) String() string {
-	return fmt.Sprintf("%s/%s/%s", a.Location, a.GrainType, a.ID)
-}
-
-type Addressable interface {
-	GetAddress() Address
 }
 
 type ActivationDesc struct {
@@ -51,10 +34,10 @@ type ObservableDesc struct {
 	NotifyHandler NotifyObserverHandler
 }
 
-type ActivationHandler func(activator interface{}, ctx context.Context, coreServices CoreGrainServices, o ObserverManager, address Address) (Addressable, error)
+type ActivationHandler func(activator interface{}, ctx context.Context, coreServices CoreGrainServices, o grainservices.ObserverManager, address grain.Address) (grain.Addressable, error)
 type MethodHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) (interface{}, error)
 type ObservableHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) error
-type NotifyObserverHandler func(m ObserverManager, ctx context.Context, o []RegisteredObserver) error
+type NotifyObserverHandler func(m grainservices.ObserverManager, ctx context.Context, o []grain.RegisteredObserver) error
 
 type Registrar interface {
 	Register(desc *GrainDescription, impl interface{})
@@ -64,7 +47,7 @@ type Registrar interface {
 type Silo struct {
 	localGrainManager GrainActivationManager
 	client            *siloClientImpl
-	timerService      TimerService
+	timerService      grainservices.TimerService
 	log               logr.Logger
 }
 
@@ -84,7 +67,7 @@ func NewSilo(log logr.Logger, registrar Registrar) *Silo {
 		grainManager:            s.localGrainManager,
 		log:                     s.log.WithName("siloClient"),
 	}
-	s.timerService = newTimerServiceImpl(s.log.WithName("timerService"), func(grainAddr Address, name string) {
+	s.timerService = newTimerServiceImpl(s.log.WithName("timerService"), func(grainAddr grain.Address, name string) {
 		err := s.localGrainManager.EnqueueTimerTrigger(TimerTriggerNotification{
 			Receiver: grainAddr,
 			Name:     name,
@@ -101,15 +84,15 @@ func (s *Silo) Client() SiloClient {
 	return s.client
 }
 
-func (s *Silo) TimerService() TimerService {
+func (s *Silo) TimerService() grainservices.TimerService {
 	return s.timerService
 }
 
 func (s *Silo) Register(desc *GrainDescription, activator interface{}) {
 }
 
-func (s *Silo) CreateGrain(activator GenericGrainActivator) (Address, error) {
-	address := Address{
+func (s *Silo) CreateGrain(activator GenericGrainActivator) (grain.Address, error) {
+	address := grain.Address{
 		Location:  "local",
 		GrainType: "Grain",
 		ID:        ksuid.New().String(),
@@ -122,13 +105,13 @@ func (s *Silo) CreateGrain(activator GenericGrainActivator) (Address, error) {
 }
 
 type SiloClient interface {
-	InvokeMethod(ctx context.Context, toAddress Address, grainType string, method string,
+	InvokeMethod(ctx context.Context, toAddress grain.Address, grainType string, method string,
 		in proto.Message) InvokeMethodFuture
 
-	RegisterObserver(ctx context.Context, observer Address, observable Address, name string, in proto.Message) RegisterObserverFuture
-	AckRegisterObserver(ctx context.Context, receiver Address, uuid string, errOut error) error
-	SendResponse(ctx context.Context, receiver Address, uuid string, out proto.Message) error
-	NotifyObservers(ctx context.Context, observableType string, observableName string, receiver []Address, out proto.Message) error
+	RegisterObserver(ctx context.Context, observer grain.Address, observable grain.Address, name string, in proto.Message) RegisterObserverFuture
+	AckRegisterObserver(ctx context.Context, receiver grain.Address, uuid string, errOut error) error
+	SendResponse(ctx context.Context, receiver grain.Address, uuid string, out proto.Message) error
+	NotifyObservers(ctx context.Context, observableType string, observableName string, receiver []grain.Address, out proto.Message) error
 }
 
 type siloClientImpl struct {
@@ -139,7 +122,7 @@ type siloClientImpl struct {
 	log                     logr.Logger
 }
 
-func (s *siloClientImpl) SendResponse(ctx context.Context, receiver Address, uuid string, out proto.Message) error {
+func (s *siloClientImpl) SendResponse(ctx context.Context, receiver grain.Address, uuid string, out proto.Message) error {
 	log := s.log.WithValues("receiver", receiver, "uuid", uuid)
 	log.V(4).Info("SendResponse")
 
@@ -167,7 +150,7 @@ func (s *siloClientImpl) SendResponse(ctx context.Context, receiver Address, uui
 	return nil
 }
 
-func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver Address, grainType string, method string,
+func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver grain.Address, grainType string, method string,
 	in proto.Message) InvokeMethodFuture {
 	id := ksuid.New().String()
 	log := s.log.WithValues("uuid", id, "receiver", receiver, "grainType", grainType, "method", method)
@@ -215,7 +198,7 @@ func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver Address, gra
 	return f
 }
 
-func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer Address, observable Address,
+func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer grain.Address, observable grain.Address,
 	name string, in proto.Message) RegisterObserverFuture {
 
 	id := ksuid.New().String()
@@ -259,7 +242,7 @@ func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer Address,
 	return f
 }
 
-func (s *siloClientImpl) AckRegisterObserver(ctx context.Context, receiver Address, uuid string, errOut error) error {
+func (s *siloClientImpl) AckRegisterObserver(ctx context.Context, receiver grain.Address, uuid string, errOut error) error {
 	log := s.log.WithValues("uuid", uuid, "reciever", receiver)
 	log.V(4).Info("AckRegisterObserver")
 
@@ -281,7 +264,7 @@ func (s *siloClientImpl) AckRegisterObserver(ctx context.Context, receiver Addre
 }
 
 func (s *siloClientImpl) NotifyObservers(ctx context.Context, observableType string, observableName string,
-	receivers []Address, out proto.Message) error {
+	receivers []grain.Address, out proto.Message) error {
 
 	log := s.log.WithValues("recievers", receivers)
 	log.V(4).Info("NotifyObservers")

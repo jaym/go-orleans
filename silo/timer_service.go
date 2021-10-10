@@ -3,25 +3,16 @@ package silo
 import (
 	"container/heap"
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/jaym/go-orleans/grain"
+	grainservices "github.com/jaym/go-orleans/grain/services"
 )
 
-var ErrTimerAlreadyRegistered = errors.New("timer already registered")
-
-type TimerService interface {
-	Start()
-	Stop(context.Context) error
-	RegisterTimer(addr Address, name string, d time.Duration) error
-	RegisterTicker(addr Address, name string, d time.Duration) error
-	Cancel(addr Address, name string) bool
-}
-
 type timerEntry struct {
-	grainAddr Address
+	grainAddr grain.Address
 	name      string
 	d         time.Duration
 	repeat    bool
@@ -39,7 +30,7 @@ const (
 )
 
 type timerServiceReigsterTimerReq struct {
-	addr   Address
+	addr   grain.Address
 	name   string
 	d      time.Duration
 	repeat bool
@@ -47,7 +38,7 @@ type timerServiceReigsterTimerReq struct {
 }
 
 type timerServiceCancelTimerReq struct {
-	addr Address
+	addr grain.Address
 	name string
 	resp chan bool
 }
@@ -70,9 +61,9 @@ type timerServiceImpl struct {
 	queue        *timerEntryHeap
 }
 
-type GrainTimerTrigger func(grainAddr Address, name string)
+type GrainTimerTrigger func(grainAddr grain.Address, name string)
 
-func newTimerServiceImpl(log logr.Logger, grainTimerTrigger GrainTimerTrigger) TimerService {
+func newTimerServiceImpl(log logr.Logger, grainTimerTrigger GrainTimerTrigger) grainservices.TimerService {
 	ctlChan := make(chan timerServiceControlMessage)
 	queue := make(timerEntryHeap, 0, 512)
 	heap.Init(&queue)
@@ -163,7 +154,7 @@ func (s *timerServiceImpl) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (s *timerServiceImpl) RegisterTimer(addr Address, name string, d time.Duration) error {
+func (s *timerServiceImpl) RegisterTimer(addr grain.Address, name string, d time.Duration) error {
 	respChan := make(chan error, 1)
 	s.ctlChan <- timerServiceControlMessage{
 		msgType: timerServiceCtlMsgTypeRegister,
@@ -177,7 +168,7 @@ func (s *timerServiceImpl) RegisterTimer(addr Address, name string, d time.Durat
 	return <-respChan
 }
 
-func (s *timerServiceImpl) Cancel(addr Address, name string) bool {
+func (s *timerServiceImpl) Cancel(addr grain.Address, name string) bool {
 	respChan := make(chan bool, 1)
 	s.ctlChan <- timerServiceControlMessage{
 		msgType: timerServiceCtlMsgTypeCancel,
@@ -190,7 +181,7 @@ func (s *timerServiceImpl) Cancel(addr Address, name string) bool {
 	return <-respChan
 }
 
-func (s *timerServiceImpl) RegisterTicker(addr Address, name string, d time.Duration) error {
+func (s *timerServiceImpl) RegisterTicker(addr grain.Address, name string, d time.Duration) error {
 	respChan := make(chan error, 1)
 	s.ctlChan <- timerServiceControlMessage{
 		msgType: timerServiceCtlMsgTypeRegister,
@@ -205,13 +196,13 @@ func (s *timerServiceImpl) RegisterTicker(addr Address, name string, d time.Dura
 	return <-respChan
 }
 
-func (s *timerServiceImpl) register(addr Address, name string, d time.Duration, repeat bool) error {
+func (s *timerServiceImpl) register(addr grain.Address, name string, d time.Duration, repeat bool) error {
 	s.log.V(4).Info("processing register", "address", addr, "name", name, "duration", d, "repeat", repeat)
 
 	entryName := s.entryName(addr.GrainType, addr.ID, name)
 	if e, ok := s.timerEntries[entryName]; ok {
 		if !e.canceled {
-			return ErrTimerAlreadyRegistered
+			return grainservices.ErrTimerAlreadyRegistered
 		}
 	}
 	entry := &timerEntry{
@@ -224,7 +215,7 @@ func (s *timerServiceImpl) register(addr Address, name string, d time.Duration, 
 	return nil
 }
 
-func (s *timerServiceImpl) cancel(addr Address, name string) bool {
+func (s *timerServiceImpl) cancel(addr grain.Address, name string) bool {
 	s.log.V(4).Info("processing cancel", "address", addr, "name", name)
 
 	entryName := s.entryName(addr.GrainType, addr.ID, name)
@@ -273,8 +264,8 @@ type GrainTimerService interface {
 }
 
 type grainTimerServiceImpl struct {
-	grainAddress Address
-	timerService TimerService
+	grainAddress grain.Address
+	timerService grainservices.TimerService
 	timers       map[string]func()
 }
 

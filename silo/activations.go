@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jaym/go-orleans/grain"
+	grainservices "github.com/jaym/go-orleans/grain/services"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -20,33 +22,33 @@ type GrainActivationManager interface {
 }
 
 type ActivateGrainRequest struct {
-	Address   Address
+	Address   grain.Address
 	Activator GenericGrainActivator
 }
 
 type EvictGrainRequest struct {
-	Address Address
+	Address grain.Address
 }
 
 type InvokeMethodRequest struct {
-	Sender   Address
-	Receiver Address
+	Sender   grain.Address
+	Receiver grain.Address
 	Method   string
 	UUID     string
 	in       []byte
 }
 
 type RegisterObserverRequest struct {
-	Observer   Address
-	Observable Address
+	Observer   grain.Address
+	Observable grain.Address
 	Name       string
 	UUID       string
 	In         []byte
 }
 
 type ObserverNotification struct {
-	Sender         Address
-	Receivers      []Address
+	Sender         grain.Address
+	Receivers      []grain.Address
 	ObservableType string
 	Name           string
 	UUID           string
@@ -54,7 +56,7 @@ type ObserverNotification struct {
 }
 
 type TimerTriggerNotification struct {
-	Receiver Address
+	Receiver grain.Address
 	Name     string
 }
 
@@ -78,13 +80,13 @@ type grainActivationRegisterObserver struct {
 }
 
 type grainActivationTriggerTimer struct {
-	Receiver Address
+	Receiver grain.Address
 	Name     string
 }
 
 type grainActivationNotifyObserver struct {
-	Sender         Address
-	Receiver       Address
+	Sender         grain.Address
+	Receiver       grain.Address
 	ObservableType string
 	Name           string
 	UUID           string
@@ -104,15 +106,15 @@ type grainActivationEvict struct {
 }
 
 type GrainActivation struct {
-	Address            Address
+	Address            grain.Address
 	Description        *GrainDescription
 	impl               interface{}
 	inbox              chan grainActivationMessage
 	siloClient         SiloClient
 	registrar          Registrar
-	timerService       TimerService
+	timerService       grainservices.TimerService
 	resourceManager    *resourceManager
-	deactivateCallback func(Address)
+	deactivateCallback func(grain.Address)
 }
 
 func (g *GrainActivation) findMethodDesc(name string) (*MethodDesc, error) {
@@ -246,20 +248,20 @@ LOOP:
 
 type GrainActivationManagerImpl struct {
 	lock               sync.Mutex
-	grainActivations   map[Address]*GrainActivation
+	grainActivations   map[grain.Address]*GrainActivation
 	registrar          Registrar
 	silo               *Silo
 	resourceManager    *resourceManager
-	deactivateCallback func(Address)
+	deactivateCallback func(grain.Address)
 }
 
 func NewGrainActivationManager(registrar Registrar, silo *Silo) *GrainActivationManagerImpl {
 	m := &GrainActivationManagerImpl{
-		grainActivations: make(map[Address]*GrainActivation),
+		grainActivations: make(map[grain.Address]*GrainActivation),
 		registrar:        registrar,
 		silo:             silo,
 	}
-	resourceManager := newResourceManager(8, func(addresses []Address) {
+	resourceManager := newResourceManager(8, func(addresses []grain.Address) {
 		for _, a := range addresses {
 			m.EnqueueEvictGrain(EvictGrainRequest{
 				Address: a,
@@ -268,7 +270,7 @@ func NewGrainActivationManager(registrar Registrar, silo *Silo) *GrainActivation
 	})
 	resourceManager.Start()
 	m.resourceManager = resourceManager
-	m.deactivateCallback = func(a Address) {
+	m.deactivateCallback = func(a grain.Address) {
 		m.resourceManager.Remove(a)
 		m.lock.Lock()
 		defer m.lock.Unlock()
@@ -277,7 +279,7 @@ func NewGrainActivationManager(registrar Registrar, silo *Silo) *GrainActivation
 	return m
 }
 
-func (m *GrainActivationManagerImpl) activateGrainWithDefaultActivator(address Address) (*GrainActivation, error) {
+func (m *GrainActivationManagerImpl) activateGrainWithDefaultActivator(address grain.Address) (*GrainActivation, error) {
 	grainDesc, activator, err := m.registrar.Lookup(address.GrainType)
 	if err != nil {
 		return nil, err
@@ -298,7 +300,7 @@ func (m *GrainActivationManagerImpl) activateGrainWithDefaultActivator(address A
 	return activation, nil
 }
 
-func (m *GrainActivationManagerImpl) activateGrainWithActivator(address Address, activator interface{}) (*GrainActivation, error) {
+func (m *GrainActivationManagerImpl) activateGrainWithActivator(address grain.Address, activator interface{}) (*GrainActivation, error) {
 	grainDesc, _, err := m.registrar.Lookup(address.GrainType)
 	if err != nil {
 		return nil, err
@@ -451,7 +453,7 @@ func (m *GrainActivationManagerImpl) EnqueueEvictGrain(req EvictGrainRequest) er
 	return nil
 }
 
-func (m *GrainActivationManagerImpl) getActivation(receiver Address, allowActivation bool) (*GrainActivation, error) {
+func (m *GrainActivationManagerImpl) getActivation(receiver grain.Address, allowActivation bool) (*GrainActivation, error) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	activation, ok := m.grainActivations[receiver]

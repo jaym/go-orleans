@@ -1,19 +1,23 @@
 package silo
 
-import "context"
+import (
+	"context"
+
+	"github.com/jaym/go-orleans/grain"
+)
 
 var addressCtxKey = struct{}{}
 var siloClientCtxKey = struct{}{}
 
-func AddressFromContext(ctx context.Context) *Address {
-	v, ok := ctx.Value(addressCtxKey).(Address)
+func AddressFromContext(ctx context.Context) *grain.Address {
+	v, ok := ctx.Value(addressCtxKey).(grain.Address)
 	if ok {
 		return &v
 	}
 	return nil
 }
 
-func WithAddressContext(ctx context.Context, address Address) context.Context {
+func WithAddressContext(ctx context.Context, address grain.Address) context.Context {
 	return context.WithValue(ctx, addressCtxKey, address)
 }
 

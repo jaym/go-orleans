@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-logr/stdr"
 	examples "github.com/jaym/go-orleans/examples/proto"
+	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/silo"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,7 @@ import (
 type ChirperGrainActivatorTestImpl struct {
 }
 
-func (*ChirperGrainActivatorTestImpl) Activate(ctx context.Context, address silo.Address, services examples.ChirperGrainServices) (examples.ChirperGrain, error) {
+func (*ChirperGrainActivatorTestImpl) Activate(ctx context.Context, address grain.Address, services examples.ChirperGrainServices) (examples.ChirperGrain, error) {
 	g := &ChirperGrainImpl{
 		Address:  address,
 		services: services,
@@ -40,7 +41,7 @@ func (*ChirperGrainActivatorTestImpl) Activate(ctx context.Context, address silo
 }
 
 type ChirperGrainImpl struct {
-	silo.Address
+	grain.Address
 	services examples.ChirperGrainServices
 }
 
@@ -106,14 +107,14 @@ func TestItAll(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		a := silo.Address{
+		a := grain.Address{
 			Location:  "local",
 			GrainType: "ChirperGrain",
 			ID:        fmt.Sprintf("g%d", i),
 		}
 		ref := examples.GetChirperGrain(s.Client(), a)
 		fmt.Printf("Calling g%d\n", i)
-		_, err := ref.PublishMessage(silo.WithAddressContext(context.Background(), silo.Address{
+		_, err := ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
 			Location: "local",
 		}), in)
 		if err != nil {
@@ -121,13 +122,13 @@ func TestItAll(t *testing.T) {
 		}
 	}
 
-	g1Address := silo.Address{
+	g1Address := grain.Address{
 		Location:  "local",
 		GrainType: "ChirperGrain",
 		ID:        "u1",
 	}
 
-	g2Address := silo.Address{
+	g2Address := grain.Address{
 		Location:  "local",
 		GrainType: "ChirperGrain",
 		ID:        "u2",
@@ -144,30 +145,30 @@ func TestItAll(t *testing.T) {
 	err = chirperGrain1Ref.ObserveMessage(context.Background(), address, &examples.SubscribeRequest{})
 	require.NoError(t, err)
 
-	resp, err := chirperGrain2Ref.PublishMessage(silo.WithAddressContext(context.Background(), silo.Address{
+	resp, err := chirperGrain2Ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
 		Location: "local",
 	}), in)
 	require.NoError(t, err)
 
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), silo.Address{
+	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
 		Location: "local",
 	}), in)
 	require.NoError(t, err)
 	require.Equal(t, "hello world", resp.Foobar)
 
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), silo.Address{
+	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
 		Location: "local",
 	}), in)
 	require.NoError(t, err)
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), silo.Address{
+	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
 		Location: "local",
 	}), in)
 	require.NoError(t, err)
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), silo.Address{
+	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
 		Location: "local",
 	}), in)
 	require.NoError(t, err)
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), silo.Address{
+	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
 		Location: "local",
 	}), in)
 	require.NoError(t, err)

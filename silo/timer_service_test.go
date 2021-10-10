@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-logr/stdr"
+	"github.com/jaym/go-orleans/grain"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -19,7 +20,7 @@ func TestTimerEntryHeap(t *testing.T) {
 
 	now := time.Now()
 
-	grainAdder := Address{
+	grainAdder := grain.Address{
 		Location:  "local",
 		GrainType: "type1",
 		ID:        "u1",
@@ -71,7 +72,7 @@ type triggerable struct {
 	received []triggerExpectation
 }
 
-func (trig *triggerable) TriggerGrainTimer(grainAddr Address, name string) {
+func (trig *triggerable) TriggerGrainTimer(grainAddr grain.Address, name string) {
 	trig.l.Lock()
 	defer trig.l.Unlock()
 	trig.received = append(trig.received, triggerExpectation{grainAddr: grainAddr, name: name})
@@ -79,7 +80,7 @@ func (trig *triggerable) TriggerGrainTimer(grainAddr Address, name string) {
 }
 
 type triggerExpectation struct {
-	grainAddr Address
+	grainAddr grain.Address
 	name      string
 }
 
@@ -107,12 +108,12 @@ func TestTimerService(t *testing.T) {
 	s.nowProvider = nowProvider
 	s.Start()
 
-	g1Addr := Address{
+	g1Addr := grain.Address{
 		Location:  "local",
 		GrainType: "type1",
 		ID:        "id1",
 	}
-	g2Addr := Address{
+	g2Addr := grain.Address{
 		Location:  "local",
 		GrainType: "type2",
 		ID:        "id2",

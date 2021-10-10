@@ -4,30 +4,18 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jaym/go-orleans/grain"
 	"github.com/segmentio/ksuid"
 	"google.golang.org/protobuf/proto"
 )
 
-type RegisteredObserver interface {
-	Addressable
-	UUID() string
-	Get(interface{}) error
-}
-
-type ObserverManager interface {
-	List(ctx context.Context, observableName string) ([]RegisteredObserver, error)
-	Add(ctx context.Context, observableName string, address Address, val []byte) (RegisteredObserver, error)
-	Remove(ctx context.Context, observableName string, uuid string) error
-	Notify(ctx context.Context, observableName string, observers []RegisteredObserver, val proto.Message) error
-}
-
 type EncodedRegisteredObserver struct {
-	Address
+	grain.Address
 	uuid ksuid.KSUID
 	val  []byte
 }
 
-func NewRegisteredObserver(address Address, val []byte) (*EncodedRegisteredObserver, error) {
+func NewRegisteredObserver(address grain.Address, val []byte) (*EncodedRegisteredObserver, error) {
 	return &EncodedRegisteredObserver{
 		Address: address,
 		uuid:    ksuid.New(),
@@ -44,24 +32,24 @@ func (o *EncodedRegisteredObserver) Get(v interface{}) error {
 }
 
 type InmemoryObserverManager struct {
-	registeredObservers map[string][]RegisteredObserver
+	registeredObservers map[string][]grain.RegisteredObserver
 	siloClient          SiloClient
-	owner               Address
+	owner               grain.Address
 }
 
-func NewInmemoryObserverManager(owner Address, siloClient SiloClient) *InmemoryObserverManager {
+func NewInmemoryObserverManager(owner grain.Address, siloClient SiloClient) *InmemoryObserverManager {
 	return &InmemoryObserverManager{
 		owner:               owner,
 		siloClient:          siloClient,
-		registeredObservers: make(map[string][]RegisteredObserver),
+		registeredObservers: make(map[string][]grain.RegisteredObserver),
 	}
 }
 
-func (m *InmemoryObserverManager) List(ctx context.Context, observableName string) ([]RegisteredObserver, error) {
+func (m *InmemoryObserverManager) List(ctx context.Context, observableName string) ([]grain.RegisteredObserver, error) {
 	return m.registeredObservers[observableName], nil
 }
 
-func (m *InmemoryObserverManager) Add(ctx context.Context, observableName string, address Address, val []byte) (RegisteredObserver, error) {
+func (m *InmemoryObserverManager) Add(ctx context.Context, observableName string, address grain.Address, val []byte) (grain.RegisteredObserver, error) {
 	o, err := NewRegisteredObserver(address, val)
 	if err != nil {
 		return nil, err
@@ -82,9 +70,9 @@ func (m *InmemoryObserverManager) Remove(ctx context.Context, observableName str
 	return nil
 }
 
-func (m *InmemoryObserverManager) Notify(ctx context.Context, observableName string, observers []RegisteredObserver, val proto.Message) error {
+func (m *InmemoryObserverManager) Notify(ctx context.Context, observableName string, observers []grain.RegisteredObserver, val proto.Message) error {
 	fmt.Printf("notifying %d observers\n", len(observers))
-	receivers := make([]Address, len(observers))
+	receivers := make([]grain.Address, len(observers))
 	for i := range observers {
 		receivers[i] = observers[i].GetAddress()
 	}

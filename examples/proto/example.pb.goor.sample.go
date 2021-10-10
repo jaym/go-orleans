@@ -2,18 +2,18 @@ package examples
 
 /*
 type ChirperGrainRef interface {
-	silo.Addressable
+	grain.Addressable
 	PublishMessage(context.Context, *PublishMessageRequest) (*PublishMessageResponse, error)
 	Subscribe(context.Context, ChirpMessageObserverRef, *SubscribeRequest) error
 }
 
 type ChirperGrainActivator interface {
-	Activate(ctx context.Context, address silo.Address) (ChirperGrainRef, error)
+	Activate(ctx context.Context, address grain.Address) (ChirperGrainRef, error)
 }
 
 type ChirperGrainClient interface {
 	GetByID(ctx context.Context, id string) (ChirperGrainRef, error)
-	GetByAddress(ctx context.Context, address silo.Address) (ChirperGrainRef, error)
+	GetByAddress(ctx context.Context, address grain.Address) (ChirperGrainRef, error)
 }
 
 type ChirpMessageObserver interface {
@@ -21,7 +21,7 @@ type ChirpMessageObserver interface {
 }
 
 type ChirpMessageObserverRef interface {
-	silo.Addressable
+	grain.Addressable
 	ChirpMessageObserver
 }
 
@@ -34,11 +34,11 @@ func CreateChirpMessageObserver(ctx context.Context, o ChirpMessageObserver) (Ch
 	return nil, errors.New("Unimplemented")
 }
 
-func ChirpMessageObserverFromAddress(ctx context.Context, client silo.SiloClient, address silo.Address) (ChirpMessageObserverRef, error) {
+func ChirpMessageObserverFromAddress(ctx context.Context, client silo.SiloClient, address grain.Address) (ChirpMessageObserverRef, error) {
 	return nil, errors.New("Unimplemented")
 }
 
-func _ChirperGrain_Activate(activator interface{}, ctx context.Context, address silo.Address) (silo.Addressable, error) {
+func _ChirperGrain_Activate(activator interface{}, ctx context.Context, address grain.Address) (grain.Addressable, error) {
 	return activator.(ChirperGrainActivator).Activate(ctx, address)
 }
 
@@ -52,7 +52,7 @@ func _ChirperGrain_PublishMessage_GrainHandler(srv interface{}, ctx context.Cont
 }
 
 func _ChirperGrain_Subscribe_GrainObservableHandler(srv interface{}, ctx context.Context,
-	client silo.SiloClient, observerAddress silo.Address, dec func(interface{}) error) error {
+	client silo.SiloClient, observerAddress grain.Address, dec func(interface{}) error) error {
 	in := new(SubscribeRequest)
 	if err := dec(in); err != nil {
 		return err
