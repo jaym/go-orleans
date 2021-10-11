@@ -15,7 +15,7 @@ type ChirperGrainServices interface {
 }
 
 type impl_ChirperGrainServices struct {
-	observerManager services.ObserverManager
+	observerManager services.GrainObserverManager
 	coreServices    silo.CoreGrainServices
 }
 
@@ -104,7 +104,7 @@ var ChirperGrain_GrainDesc = silo.GrainDescription{
 	},
 }
 
-func _ChirperGrain_Activate(activator interface{}, ctx context.Context, coreServices silo.CoreGrainServices, observerManager services.ObserverManager, address grain.Address) (grain.Addressable, error) {
+func _ChirperGrain_Activate(activator interface{}, ctx context.Context, coreServices silo.CoreGrainServices, observerManager services.GrainObserverManager, address grain.Address) (grain.Addressable, error) {
 	grainServices := &impl_ChirperGrainServices{
 		observerManager: observerManager,
 		coreServices:    coreServices,

@@ -245,7 +245,7 @@ func writeGrainServicesInterface(g *protogen.GeneratedFile, svc *protogen.Servic
 
 func writeGrainServicesImplementation(g *protogen.GeneratedFile, svc *protogen.Service) {
 	g.P("type ", "impl_", svc.GoName, "GrainServices struct {")
-	g.P("observerManager ", grainServicesPackage.Ident("ObserverManager"))
+	g.P("observerManager ", grainServicesPackage.Ident("GrainObserverManager"))
 	g.P("coreServices ", siloPackage.Ident("CoreGrainServices"))
 	g.P("}")
 	g.P()
@@ -332,7 +332,7 @@ func writeActivateHandler(g *protogen.GeneratedFile, svc *protogen.Service) {
 		"activator interface{},",
 		"ctx ", g.QualifiedGoIdent(contextPackage.Ident("Context")), ", ",
 		"coreServices ", g.QualifiedGoIdent(siloPackage.Ident("CoreGrainServices")), ", ",
-		"observerManager ", g.QualifiedGoIdent(grainServicesPackage.Ident("ObserverManager")), ", ",
+		"observerManager ", g.QualifiedGoIdent(grainServicesPackage.Ident("GrainObserverManager")), ", ",
 		"address ", g.QualifiedGoIdent(grainPackage.Ident("Address")), ") (",
 		g.QualifiedGoIdent(grainPackage.Ident("Addressable")), ", error) {",
 	)

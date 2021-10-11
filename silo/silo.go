@@ -34,10 +34,10 @@ type ObservableDesc struct {
 	NotifyHandler NotifyObserverHandler
 }
 
-type ActivationHandler func(activator interface{}, ctx context.Context, coreServices CoreGrainServices, o grainservices.ObserverManager, address grain.Address) (grain.Addressable, error)
+type ActivationHandler func(activator interface{}, ctx context.Context, coreServices CoreGrainServices, o grainservices.GrainObserverManager, address grain.Address) (grain.Addressable, error)
 type MethodHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) (interface{}, error)
 type ObservableHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) error
-type NotifyObserverHandler func(m grainservices.ObserverManager, ctx context.Context, o []grain.RegisteredObserver) error
+type NotifyObserverHandler func(m grainservices.GrainObserverManager, ctx context.Context, o []grain.RegisteredObserver) error
 
 type Registrar interface {
 	Register(desc *GrainDescription, impl interface{})
