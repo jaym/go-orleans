@@ -2,12 +2,16 @@ package silo
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/jaym/go-orleans/grain"
 	grainservices "github.com/jaym/go-orleans/grain/services"
+	"github.com/jaym/go-orleans/plugins/codec"
+	"github.com/jaym/go-orleans/plugins/codec/protobuf"
+	"github.com/jaym/go-orleans/silo/services/timer"
 	"github.com/segmentio/ksuid"
 	"google.golang.org/protobuf/proto"
 )
@@ -34,7 +38,7 @@ type ObservableDesc struct {
 	NotifyHandler NotifyObserverHandler
 }
 
-type ActivationHandler func(activator interface{}, ctx context.Context, coreServices CoreGrainServices, o grainservices.GrainObserverManager, address grain.Address) (grain.Addressable, error)
+type ActivationHandler func(activator interface{}, ctx context.Context, coreServices grainservices.CoreGrainServices, o grainservices.GrainObserverManager, address grain.Address) (grain.Addressable, error)
 type MethodHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) (interface{}, error)
 type ObservableHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) error
 type NotifyObserverHandler func(m grainservices.GrainObserverManager, ctx context.Context, o []grain.RegisteredObserver) error
@@ -47,7 +51,7 @@ type Registrar interface {
 type Silo struct {
 	localGrainManager GrainActivationManager
 	client            *siloClientImpl
-	timerService      grainservices.TimerService
+	timerService      timer.TimerService
 	log               logr.Logger
 }
 
@@ -62,10 +66,11 @@ func NewSilo(log logr.Logger, registrar Registrar) *Silo {
 	registrar.Register(&grain_GrainDesc, nil)
 	s.localGrainManager = NewGrainActivationManager(registrar, s)
 	s.client = &siloClientImpl{
-		futures:                 make(map[string]InvokeMethodFuture),
-		registerObserverFutures: make(map[string]RegisterObserverFuture),
+		futures:                 make(map[string]grain.InvokeMethodFuture),
+		registerObserverFutures: make(map[string]grain.RegisterObserverFuture),
 		grainManager:            s.localGrainManager,
 		log:                     s.log.WithName("siloClient"),
+		codec:                   protobuf.NewCodec(),
 	}
 	s.timerService = newTimerServiceImpl(s.log.WithName("timerService"), func(grainAddr grain.Address, name string) {
 		err := s.localGrainManager.EnqueueTimerTrigger(TimerTriggerNotification{
@@ -80,11 +85,11 @@ func NewSilo(log logr.Logger, registrar Registrar) *Silo {
 	return s
 }
 
-func (s *Silo) Client() SiloClient {
+func (s *Silo) Client() grain.SiloClient {
 	return s.client
 }
 
-func (s *Silo) TimerService() grainservices.TimerService {
+func (s *Silo) TimerService() timer.TimerService {
 	return s.timerService
 }
 
@@ -104,22 +109,13 @@ func (s *Silo) CreateGrain(activator GenericGrainActivator) (grain.Address, erro
 	return address, err
 }
 
-type SiloClient interface {
-	InvokeMethod(ctx context.Context, toAddress grain.Address, grainType string, method string,
-		in proto.Message) InvokeMethodFuture
-
-	RegisterObserver(ctx context.Context, observer grain.Address, observable grain.Address, name string, in proto.Message) RegisterObserverFuture
-	AckRegisterObserver(ctx context.Context, receiver grain.Address, uuid string, errOut error) error
-	SendResponse(ctx context.Context, receiver grain.Address, uuid string, out proto.Message) error
-	NotifyObservers(ctx context.Context, observableType string, observableName string, receiver []grain.Address, out proto.Message) error
-}
-
 type siloClientImpl struct {
 	mutex                   sync.Mutex
-	futures                 map[string]InvokeMethodFuture
-	registerObserverFutures map[string]RegisterObserverFuture
+	futures                 map[string]grain.InvokeMethodFuture
+	registerObserverFutures map[string]grain.RegisterObserverFuture
 	grainManager            GrainActivationManager
 	log                     logr.Logger
+	codec                   codec.Codec
 }
 
 func (s *siloClientImpl) SendResponse(ctx context.Context, receiver grain.Address, uuid string, out proto.Message) error {
@@ -134,15 +130,8 @@ func (s *siloClientImpl) SendResponse(ctx context.Context, receiver grain.Addres
 		log.Info("future not found")
 		panic("future not found")
 	}
-	bytes, err := proto.Marshal(out)
-	if err != nil {
-		log.Error(err, "failed to marshal")
-		return err
-	}
-	err = f.Resolve(InvokeMethodResp{
-		data: bytes,
-	})
-	if err != nil {
+
+	if err := f.ResolveValue(out); err != nil {
 		log.Error(err, "failed to resolve future")
 		return err
 	}
@@ -151,13 +140,13 @@ func (s *siloClientImpl) SendResponse(ctx context.Context, receiver grain.Addres
 }
 
 func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver grain.Address, grainType string, method string,
-	in proto.Message) InvokeMethodFuture {
+	in proto.Message) grain.InvokeMethodFuture {
 	id := ksuid.New().String()
 	log := s.log.WithValues("uuid", id, "receiver", receiver, "grainType", grainType, "method", method)
 
 	log.V(4).Info("InvokeMethod")
 
-	f := newInvokeMethodFuture(id, 60*time.Second)
+	f := newInvokeMethodFuture(s.codec, id, 60*time.Second)
 	sender := AddressFromContext(ctx)
 	if sender == nil {
 		log.Info("no sender in context")
@@ -191,7 +180,7 @@ func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver grain.Addres
 		s.mutex.Lock()
 		delete(s.futures, id)
 		s.mutex.Unlock()
-		if rErr := f.Resolve(InvokeMethodResp{err: err}); rErr != nil {
+		if rErr := f.ResolveError(err); rErr != nil {
 			log.Error(err, "failed to resolve future")
 		}
 	}
@@ -199,7 +188,7 @@ func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver grain.Addres
 }
 
 func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer grain.Address, observable grain.Address,
-	name string, in proto.Message) RegisterObserverFuture {
+	name string, in proto.Message) grain.RegisterObserverFuture {
 
 	id := ksuid.New().String()
 
@@ -207,27 +196,21 @@ func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer grain.Ad
 	log.V(4).Info("RegisterObserver")
 
 	f := newRegisterObserverFuture(id, 60*time.Second)
-	bytes, err := proto.Marshal(in)
-	if err != nil {
-		log.Error(err, "failed to marshal")
-		// TODO: error handling
-		panic(err)
-	}
 	s.mutex.Lock()
 	if _, ok := s.registerObserverFutures[id]; ok {
 		s.mutex.Unlock()
-		log.Error(err, "duplicate futures found")
+		log.Error(errors.New("duplicate future ids"), "duplicate futures found")
 		panic("duplicate future ids")
 	}
 	s.registerObserverFutures[id] = f
 	s.mutex.Unlock()
 
-	err = s.grainManager.EnqueueRegisterObserverRequest(RegisterObserverRequest{
+	err := s.grainManager.EnqueueRegisterObserverRequest(RegisterObserverRequest{
 		Observer:   observer,
 		Observable: observable,
 		Name:       name,
 		UUID:       id,
-		In:         bytes,
+		In:         in,
 	})
 	if err != nil {
 		log.Error(err, "failed to enqueue register observer request")
@@ -235,7 +218,7 @@ func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer grain.Ad
 		s.mutex.Lock()
 		delete(s.registerObserverFutures, id)
 		s.mutex.Unlock()
-		if rErr := f.Resolve(RegisterObserverResp{Err: err}); rErr != nil {
+		if rErr := f.ResolveError(err); rErr != nil {
 			log.Error(err, "failed to resolve future")
 		}
 	}
@@ -253,9 +236,14 @@ func (s *siloClientImpl) AckRegisterObserver(ctx context.Context, receiver grain
 		panic("future not found")
 	}
 
-	err := f.Resolve(RegisterObserverResp{
-		Err: errOut,
-	})
+	var err error
+
+	if errOut != nil {
+		err = f.ResolveError(errOut)
+	} else {
+		err = f.Resolve()
+	}
+
 	s.mutex.Lock()
 	delete(s.futures, uuid)
 	s.mutex.Unlock()

@@ -5,26 +5,24 @@ import (
 	"fmt"
 
 	"github.com/jaym/go-orleans/grain"
-	"github.com/segmentio/ksuid"
 	"google.golang.org/protobuf/proto"
 )
 
 type EncodedRegisteredObserver struct {
 	grain.Address
-	uuid ksuid.KSUID
-	val  []byte
+	val []byte
 }
 
-func NewRegisteredObserver(address grain.Address, val []byte) (*EncodedRegisteredObserver, error) {
+func NewRegisteredObserver(address grain.Address, val interface{}) (*EncodedRegisteredObserver, error) {
+	// TODO: should not need to marshal
+	data, err := proto.Marshal(val.(proto.Message))
+	if err != nil {
+		return nil, err
+	}
 	return &EncodedRegisteredObserver{
 		Address: address,
-		uuid:    ksuid.New(),
-		val:     val,
+		val:     data,
 	}, nil
-}
-
-func (o *EncodedRegisteredObserver) UUID() string {
-	return o.uuid.String()
 }
 
 func (o *EncodedRegisteredObserver) Get(v interface{}) error {
@@ -33,11 +31,11 @@ func (o *EncodedRegisteredObserver) Get(v interface{}) error {
 
 type InmemoryObserverManager struct {
 	registeredObservers map[string][]grain.RegisteredObserver
-	siloClient          SiloClient
+	siloClient          grain.SiloClient
 	owner               grain.Address
 }
 
-func NewInmemoryObserverManager(owner grain.Address, siloClient SiloClient) *InmemoryObserverManager {
+func NewInmemoryObserverManager(owner grain.Address, siloClient grain.SiloClient) *InmemoryObserverManager {
 	return &InmemoryObserverManager{
 		owner:               owner,
 		siloClient:          siloClient,
@@ -49,25 +47,21 @@ func (m *InmemoryObserverManager) List(ctx context.Context, observableName strin
 	return m.registeredObservers[observableName], nil
 }
 
-func (m *InmemoryObserverManager) Add(ctx context.Context, observableName string, address grain.Address, val []byte) (grain.RegisteredObserver, error) {
+func (m *InmemoryObserverManager) Add(ctx context.Context, observableName string, address grain.Address, val interface{}) (grain.RegisteredObserver, error) {
 	o, err := NewRegisteredObserver(address, val)
 	if err != nil {
 		return nil, err
 	}
-	m.registeredObservers[observableName] = append(m.registeredObservers[observableName], o)
-	return o, nil
-}
+	observables := m.registeredObservers[observableName]
+	for i := range observables {
+		if observables[i].GetAddress() == address {
+			observables[i] = o
 
-func (m *InmemoryObserverManager) Remove(ctx context.Context, observableName string, uuid string) error {
-	observersForObservable := m.registeredObservers[observableName]
-	for i, ro := range observersForObservable {
-		if ro.UUID() == uuid {
-			observersForObservable[i] = observersForObservable[len(observersForObservable)-1]
-			m.registeredObservers[observableName] = observersForObservable[:len(observersForObservable)-1]
-			return nil
+			return observables[i], nil
 		}
 	}
-	return nil
+	m.registeredObservers[observableName] = append(m.registeredObservers[observableName], o)
+	return o, nil
 }
 
 func (m *InmemoryObserverManager) Notify(ctx context.Context, observableName string, observers []grain.RegisteredObserver, val proto.Message) error {

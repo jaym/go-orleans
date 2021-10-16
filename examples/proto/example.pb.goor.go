@@ -9,17 +9,17 @@ import (
 )
 
 type ChirperGrainServices interface {
-	CoreGrainServices() silo.CoreGrainServices
+	CoreGrainServices() services.CoreGrainServices
 	NotifyMessageObservers(ctx context.Context, observers []grain.RegisteredObserver, val *ChirpMessage) error
 	ListMessageObservers(ctx context.Context) ([]grain.RegisteredObserver, error)
 }
 
 type impl_ChirperGrainServices struct {
 	observerManager services.GrainObserverManager
-	coreServices    silo.CoreGrainServices
+	coreServices    services.CoreGrainServices
 }
 
-func (m *impl_ChirperGrainServices) CoreGrainServices() silo.CoreGrainServices {
+func (m *impl_ChirperGrainServices) CoreGrainServices() services.CoreGrainServices {
 	return m.coreServices
 }
 
@@ -104,7 +104,7 @@ var ChirperGrain_GrainDesc = silo.GrainDescription{
 	},
 }
 
-func _ChirperGrain_Activate(activator interface{}, ctx context.Context, coreServices silo.CoreGrainServices, observerManager services.GrainObserverManager, address grain.Address) (grain.Addressable, error) {
+func _ChirperGrain_Activate(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, observerManager services.GrainObserverManager, address grain.Address) (grain.Addressable, error) {
 	grainServices := &impl_ChirperGrainServices{
 		observerManager: observerManager,
 		coreServices:    coreServices,
@@ -132,10 +132,10 @@ func _ChirperGrain_Message_ObserverHandler(srv interface{}, ctx context.Context,
 
 type _grainClient_ChirperGrain struct {
 	grain.Address
-	siloClient silo.SiloClient
+	siloClient grain.SiloClient
 }
 
-func GetChirperGrain(siloClient silo.SiloClient, address grain.Address) ChirperGrainRef {
+func GetChirperGrain(siloClient grain.SiloClient, address grain.Address) ChirperGrainRef {
 	return &_grainClient_ChirperGrain{
 		Address:    address,
 		siloClient: siloClient,
@@ -156,12 +156,9 @@ func (c *_grainClient_ChirperGrain) PublishMessage(ctx context.Context, req *Pub
 }
 func (c *_grainClient_ChirperGrain) ObserveMessage(ctx context.Context, observer grain.Addressable, req *SubscribeRequest) error {
 	f := c.siloClient.RegisterObserver(ctx, observer.GetAddress(), c.GetAddress(), ChirperGrain_GrainDesc.Observables[0].Name, req)
-	resp, err := f.Await(ctx)
+	err := f.Await(ctx)
 	if err != nil {
 		return err
-	}
-	if resp.Err != nil {
-		return resp.Err
 	}
 	return nil
 }

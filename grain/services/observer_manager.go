@@ -9,7 +9,6 @@ import (
 
 type GrainObserverManager interface {
 	List(ctx context.Context, observableName string) ([]grain.RegisteredObserver, error)
-	Add(ctx context.Context, observableName string, address grain.Address, val []byte) (grain.RegisteredObserver, error)
-	Remove(ctx context.Context, observableName string, uuid string) error
+	Add(ctx context.Context, observableName string, address grain.Address, val interface{}) (grain.RegisteredObserver, error)
 	Notify(ctx context.Context, observableName string, observers []grain.RegisteredObserver, val proto.Message) error
 }

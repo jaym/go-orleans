@@ -9,6 +9,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/jaym/go-orleans/grain"
 	grainservices "github.com/jaym/go-orleans/grain/services"
+	"github.com/jaym/go-orleans/silo/services/timer"
 )
 
 type timerEntry struct {
@@ -50,7 +51,7 @@ type timerServiceControlMessage struct {
 }
 
 type timerServiceImpl struct {
-	grainTimerTrigger GrainTimerTrigger
+	grainTimerTrigger timer.GrainTimerTrigger
 	log               logr.Logger
 
 	nowProvider func() time.Time
@@ -61,9 +62,7 @@ type timerServiceImpl struct {
 	queue        *timerEntryHeap
 }
 
-type GrainTimerTrigger func(grainAddr grain.Address, name string)
-
-func newTimerServiceImpl(log logr.Logger, grainTimerTrigger GrainTimerTrigger) grainservices.TimerService {
+func newTimerServiceImpl(log logr.Logger, grainTimerTrigger timer.GrainTimerTrigger) timer.TimerService {
 	ctlChan := make(chan timerServiceControlMessage)
 	queue := make(timerEntryHeap, 0, 512)
 	heap.Init(&queue)
@@ -256,16 +255,9 @@ func (h *timerEntryHeap) Pop() interface{} {
 	return x
 }
 
-type GrainTimerService interface {
-	Trigger(name string)
-	RegisterTimer(name string, d time.Duration, f func()) error
-	RegisterTicker(name string, d time.Duration, f func()) error
-	Cancel(name string) bool
-}
-
 type grainTimerServiceImpl struct {
 	grainAddress grain.Address
-	timerService grainservices.TimerService
+	timerService timer.TimerService
 	timers       map[string]func()
 }
 

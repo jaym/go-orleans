@@ -21,11 +21,11 @@ func WithAddressContext(ctx context.Context, address grain.Address) context.Cont
 	return context.WithValue(ctx, addressCtxKey, address)
 }
 
-func WithSiloClientContext(ctx context.Context, siloClient SiloClient) context.Context {
+func WithSiloClientContext(ctx context.Context, siloClient grain.SiloClient) context.Context {
 	return context.WithValue(ctx, siloClientCtxKey, siloClient)
 }
 
-func SiloClientFromContext(ctx context.Context) (SiloClient, bool) {
-	v, ok := ctx.Value(addressCtxKey).(SiloClient)
+func SiloClientFromContext(ctx context.Context) (grain.SiloClient, bool) {
+	v, ok := ctx.Value(addressCtxKey).(grain.SiloClient)
 	return v, ok
 }

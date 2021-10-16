@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/jaym/go-orleans/grain"
-	grainservices "github.com/jaym/go-orleans/grain/services"
+	"github.com/jaym/go-orleans/silo/services/timer"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -43,7 +43,7 @@ type RegisterObserverRequest struct {
 	Observable grain.Address
 	Name       string
 	UUID       string
-	In         []byte
+	In         interface{}
 }
 
 type ObserverNotification struct {
@@ -110,9 +110,9 @@ type GrainActivation struct {
 	Description        *GrainDescription
 	impl               interface{}
 	inbox              chan grainActivationMessage
-	siloClient         SiloClient
+	siloClient         grain.SiloClient
 	registrar          Registrar
-	timerService       grainservices.TimerService
+	timerService       timer.TimerService
 	resourceManager    *resourceManager
 	deactivateCallback func(grain.Address)
 }
