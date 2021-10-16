@@ -11,6 +11,7 @@ import (
 	grainservices "github.com/jaym/go-orleans/grain/services"
 	"github.com/jaym/go-orleans/plugins/codec"
 	"github.com/jaym/go-orleans/plugins/codec/protobuf"
+	"github.com/jaym/go-orleans/silo/services/observer"
 	"github.com/jaym/go-orleans/silo/services/timer"
 	"github.com/segmentio/ksuid"
 	"google.golang.org/protobuf/proto"
@@ -52,12 +53,14 @@ type Silo struct {
 	localGrainManager GrainActivationManager
 	client            *siloClientImpl
 	timerService      timer.TimerService
+	observerStore     observer.Store
 	log               logr.Logger
 }
 
-func NewSilo(log logr.Logger, registrar Registrar) *Silo {
+func NewSilo(log logr.Logger, observerStore observer.Store, registrar Registrar) *Silo {
 	s := &Silo{
-		log: log.WithName("silo"),
+		log:           log.WithName("silo"),
+		observerStore: observerStore,
 	}
 	// TODO: do something a little more sensible. With the generic
 	// grain, it is expected to pass in an activator for each
@@ -87,10 +90,6 @@ func NewSilo(log logr.Logger, registrar Registrar) *Silo {
 
 func (s *Silo) Client() grain.SiloClient {
 	return s.client
-}
-
-func (s *Silo) TimerService() timer.TimerService {
-	return s.timerService
 }
 
 func (s *Silo) Register(desc *GrainDescription, activator interface{}) {

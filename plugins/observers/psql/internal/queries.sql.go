@@ -14,7 +14,7 @@ SELECT observers.id, observers.owner_grain, observers.observable_name, observers
         observers.id = observer_values.id
     WHERE
         owner_grain = $1 AND
-        observable_name = $2
+        observable_name = COALESCE($2, observable_name)
 `
 
 type ListObserversParams struct {

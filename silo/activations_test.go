@@ -2,6 +2,7 @@ package silo_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	stdlog "log"
@@ -9,9 +10,14 @@ import (
 	"testing"
 	"time"
 
+	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/go-logr/stdr"
+	"github.com/jackc/pgx/v4/pgxpool"
+	_ "github.com/jackc/pgx/v4/stdlib"
 	examples "github.com/jaym/go-orleans/examples/proto"
 	"github.com/jaym/go-orleans/grain"
+	"github.com/jaym/go-orleans/plugins/codec/protobuf"
+	"github.com/jaym/go-orleans/plugins/observers/psql"
 	"github.com/jaym/go-orleans/silo"
 	"github.com/stretchr/testify/require"
 )
@@ -94,6 +100,34 @@ func (r *TestRegistrar) Lookup(grainType string) (*silo.GrainDescription, interf
 }
 
 func TestItAll(t *testing.T) {
+	database := embeddedpostgres.NewDatabase()
+	if err := database.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := database.Stop(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	pool, err := pgxpool.Connect(context.Background(), "postgres://postgres:postgres@localhost:5432/postgres")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdDb, err := sql.Open("pgx", pool.Config().ConnString())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := psql.SetupDatabase(stdDb); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := stdDb.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 	registrar := &TestRegistrar{
 		entries: make(map[string]registrarEntry),
 	}
@@ -101,7 +135,9 @@ func TestItAll(t *testing.T) {
 	examples.RegisterChirperGrainActivator(registrar, impl)
 	stdr.SetVerbosity(4)
 	log := stdr.NewWithOptions(stdlog.New(os.Stderr, "", stdlog.LstdFlags), stdr.Options{LogCaller: stdr.All})
-	s := silo.NewSilo(log, registrar)
+
+	observerStore := psql.NewObserverStore(log.WithName("observerstore"), pool, psql.WithCodec(protobuf.NewCodec()))
+	s := silo.NewSilo(log, observerStore, registrar)
 	in := &examples.PublishMessageRequest{
 		Msg: "world",
 	}

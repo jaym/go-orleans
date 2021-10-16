@@ -8,17 +8,23 @@ import (
 type registeredObserver struct {
 	codec codec.Codec
 	grain.Address
-	val []byte
+	observableName string
+	val            []byte
 }
 
-func newRegisteredObserver(codec codec.Codec, address grain.Address, val []byte) (*registeredObserver, error) {
+func newRegisteredObserver(codec codec.Codec, address grain.Address, observableName string, val []byte) *registeredObserver {
 	return &registeredObserver{
-		Address: address,
-		codec:   codec,
-		val:     val,
-	}, nil
+		Address:        address,
+		observableName: observableName,
+		codec:          codec,
+		val:            val,
+	}
 }
 
 func (o *registeredObserver) Get(v interface{}) error {
 	return o.codec.Decode(o.val, v)
+}
+
+func (o *registeredObserver) ObservableName() string {
+	return o.observableName
 }

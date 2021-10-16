@@ -35,6 +35,10 @@ func WithCodec(c codec.Codec) NewObserverStoreOption {
 	}
 }
 
+func SetupDatabase(db *sql.DB) error {
+	return internal.Migrate(db)
+}
+
 func NewObserverStore(log logr.Logger, db *pgxpool.Pool, opts ...NewObserverStoreOption) *PSQLStore {
 	s := &PSQLStore{
 		log:         log,
@@ -104,11 +108,8 @@ func (s *PSQLStore) List(ctx context.Context, owner grain.Address, observableNam
 			log.V(0).Error(err, "invald observer address", "id", r.ID, "observer", r.ObserverGrain)
 			return nil, err
 		}
-		observers = append(observers, &registeredObserver{
-			codec:   s.codec,
-			Address: addr,
-			val:     r.Val,
-		})
+		observer := newRegisteredObserver(s.codec, addr, r.ObservableName, r.Val)
+		observers = append(observers, observer)
 	}
 
 	return observers, nil

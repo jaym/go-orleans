@@ -4,7 +4,7 @@ SELECT observers.*, observer_values.val FROM observers
         observers.id = observer_values.id
     WHERE
         owner_grain = $1 AND
-        observable_name = $2;
+        observable_name = COALESCE($2, observable_name);
 
 -- name: UpsertObserver :one
 INSERT INTO observers (owner_grain, observable_name, observer_grain, expires) 

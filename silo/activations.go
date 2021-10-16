@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/jaym/go-orleans/grain"
+	"github.com/jaym/go-orleans/silo/services/observer"
 	"github.com/jaym/go-orleans/silo/services/timer"
 	"google.golang.org/protobuf/proto"
 )
@@ -114,6 +115,7 @@ type GrainActivation struct {
 	registrar          Registrar
 	timerService       timer.TimerService
 	resourceManager    *resourceManager
+	observerStore      observer.Store
 	deactivateCallback func(grain.Address)
 }
 
@@ -158,7 +160,7 @@ func (g *GrainActivation) start() {
 
 func (g *GrainActivation) loop() {
 	ctx := WithAddressContext(context.Background(), g.Address)
-	observerManager := NewInmemoryObserverManager(g.Address, g.siloClient)
+	observerManager := newGrainObserverManager(g.Address, g.observerStore, g.siloClient)
 
 	grainTimerService := &grainTimerServiceImpl{
 		grainAddress: g.Address,
@@ -292,9 +294,10 @@ func (m *GrainActivationManagerImpl) activateGrainWithDefaultActivator(address g
 		inbox:              make(chan grainActivationMessage, 8),
 		siloClient:         m.silo.Client(),
 		registrar:          m.registrar,
-		timerService:       m.silo.TimerService(),
+		timerService:       m.silo.timerService,
 		resourceManager:    m.resourceManager,
 		deactivateCallback: m.deactivateCallback,
+		observerStore:      m.silo.observerStore,
 	}
 	activation.Start()
 	return activation, nil
@@ -313,9 +316,10 @@ func (m *GrainActivationManagerImpl) activateGrainWithActivator(address grain.Ad
 		inbox:              make(chan grainActivationMessage, 8),
 		siloClient:         m.silo.Client(),
 		registrar:          m.registrar,
-		timerService:       m.silo.TimerService(),
+		timerService:       m.silo.timerService,
 		resourceManager:    m.resourceManager,
 		deactivateCallback: m.deactivateCallback,
+		observerStore:      m.silo.observerStore,
 	}
 	activation.Start()
 	return activation, nil
