@@ -8,16 +8,17 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/jaym/go-orleans/grain"
+	"github.com/jaym/go-orleans/plugins/codec"
+	"github.com/jaym/go-orleans/plugins/codec/protobuf"
 	"github.com/jaym/go-orleans/plugins/observers/psql/internal"
 	"github.com/jaym/go-orleans/silo/services/observer"
 )
 
 type PSQLStore struct {
 	log         logr.Logger
-	codec       Codec
+	codec       codec.Codec
 	nowProvider func() time.Time
 
 	db          *pgxpool.Pool
@@ -28,7 +29,7 @@ type PSQLStore struct {
 
 type NewObserverStoreOption func(*PSQLStore)
 
-func WithCodec(c Codec) NewObserverStoreOption {
+func WithCodec(c codec.Codec) NewObserverStoreOption {
 	return func(p *PSQLStore) {
 		p.codec = c
 	}
@@ -38,7 +39,7 @@ func NewObserverStore(log logr.Logger, db *pgxpool.Pool, opts ...NewObserverStor
 	s := &PSQLStore{
 		log:         log,
 		nowProvider: time.Now,
-		codec:       protobufCodec{},
+		codec:       protobuf.NewCodec(),
 		db:          db,
 		q:           internal.New(db),
 		cleanupChan: make(chan int64, 64),
@@ -180,14 +181,4 @@ func (s *PSQLStore) Remove(ctx context.Context, owner grain.Address, opts ...obs
 	}
 
 	return nil
-}
-
-type protobufCodec struct{}
-
-func (protobufCodec) Encode(v interface{}) ([]byte, error) {
-	return proto.Marshal(v.(proto.Message))
-}
-
-func (protobufCodec) Decode(b []byte, v interface{}) error {
-	return proto.Unmarshal(b, v.(proto.Message))
 }
