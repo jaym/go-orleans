@@ -38,9 +38,9 @@ type RemoveOptions struct {
 
 type RemoveOption func(*RemoveOptions)
 
-func RemoveByObserverGrain(observerAddress grain.Identity) RemoveOption {
+func RemoveByObserverGrain(observerIdentity grain.Identity) RemoveOption {
 	return func(o *RemoveOptions) {
-		o.ObserverGrain = &observerAddress
+		o.ObserverGrain = &observerIdentity
 	}
 }
 

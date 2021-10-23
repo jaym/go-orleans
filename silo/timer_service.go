@@ -31,7 +31,7 @@ const (
 )
 
 type timerServiceReigsterTimerReq struct {
-	addr   grain.Identity
+	ident  grain.Identity
 	name   string
 	d      time.Duration
 	repeat bool
@@ -39,9 +39,9 @@ type timerServiceReigsterTimerReq struct {
 }
 
 type timerServiceCancelTimerReq struct {
-	addr grain.Identity
-	name string
-	resp chan bool
+	ident grain.Identity
+	name  string
+	resp  chan bool
 }
 
 type timerServiceControlMessage struct {
@@ -94,11 +94,11 @@ func (s *timerServiceImpl) start() {
 			case msg := <-s.ctlChan:
 				switch msg.msgType {
 				case timerServiceCtlMsgTypeRegister:
-					err := s.register(msg.register.addr, msg.register.name, msg.register.d, msg.register.repeat)
+					err := s.register(msg.register.ident, msg.register.name, msg.register.d, msg.register.repeat)
 					msg.register.resp <- err
 					close(msg.register.resp)
 				case timerServiceCtlMsgTypeCancel:
-					canceled := s.cancel(msg.cancel.addr, msg.cancel.name)
+					canceled := s.cancel(msg.cancel.ident, msg.cancel.name)
 					msg.cancel.resp <- canceled
 					close(msg.cancel.resp)
 				case timerServiceCtlMsgTypeStop:
@@ -121,15 +121,15 @@ func (s *timerServiceImpl) start() {
 					}
 					v := heap.Pop(s.queue).(*timerEntry)
 					if !v.canceled {
-						s.log.V(4).Info("triggering grain", "address", v.grainAddr, "triggerName", v.name)
+						s.log.V(4).Info("triggering grain", "identity", v.grainAddr, "triggerName", v.name)
 						s.grainTimerTrigger(v.grainAddr, v.name)
 						if v.repeat {
-							s.log.V(4).Info("reregistering timer", "address", v.grainAddr, "triggerName", v.name)
+							s.log.V(4).Info("reregistering timer", "identity", v.grainAddr, "triggerName", v.name)
 							v.triggerAt = s.nowProvider().Add(v.d)
 							heap.Push(s.queue, v)
 							continue
 						}
-						s.log.V(4).Info("removing timer", "address", v.grainAddr, "triggerName", v.name)
+						s.log.V(4).Info("removing timer", "identity", v.grainAddr, "triggerName", v.name)
 						entryName := s.entryName(v.grainAddr.GrainType, v.grainAddr.ID, v.name)
 						delete(s.timerEntries, entryName)
 					}
@@ -153,39 +153,39 @@ func (s *timerServiceImpl) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (s *timerServiceImpl) RegisterTimer(addr grain.Identity, name string, d time.Duration) error {
+func (s *timerServiceImpl) RegisterTimer(ident grain.Identity, name string, d time.Duration) error {
 	respChan := make(chan error, 1)
 	s.ctlChan <- timerServiceControlMessage{
 		msgType: timerServiceCtlMsgTypeRegister,
 		register: &timerServiceReigsterTimerReq{
-			addr: addr,
-			name: name,
-			d:    d,
-			resp: respChan,
+			ident: ident,
+			name:  name,
+			d:     d,
+			resp:  respChan,
 		},
 	}
 	return <-respChan
 }
 
-func (s *timerServiceImpl) Cancel(addr grain.Identity, name string) bool {
+func (s *timerServiceImpl) Cancel(ident grain.Identity, name string) bool {
 	respChan := make(chan bool, 1)
 	s.ctlChan <- timerServiceControlMessage{
 		msgType: timerServiceCtlMsgTypeCancel,
 		cancel: &timerServiceCancelTimerReq{
-			addr: addr,
-			name: name,
-			resp: respChan,
+			ident: ident,
+			name:  name,
+			resp:  respChan,
 		},
 	}
 	return <-respChan
 }
 
-func (s *timerServiceImpl) RegisterTicker(addr grain.Identity, name string, d time.Duration) error {
+func (s *timerServiceImpl) RegisterTicker(ident grain.Identity, name string, d time.Duration) error {
 	respChan := make(chan error, 1)
 	s.ctlChan <- timerServiceControlMessage{
 		msgType: timerServiceCtlMsgTypeRegister,
 		register: &timerServiceReigsterTimerReq{
-			addr:   addr,
+			ident:  ident,
 			name:   name,
 			d:      d,
 			repeat: true,
@@ -195,17 +195,17 @@ func (s *timerServiceImpl) RegisterTicker(addr grain.Identity, name string, d ti
 	return <-respChan
 }
 
-func (s *timerServiceImpl) register(addr grain.Identity, name string, d time.Duration, repeat bool) error {
-	s.log.V(4).Info("processing register", "address", addr, "name", name, "duration", d, "repeat", repeat)
+func (s *timerServiceImpl) register(ident grain.Identity, name string, d time.Duration, repeat bool) error {
+	s.log.V(4).Info("processing register", "identity", ident, "name", name, "duration", d, "repeat", repeat)
 
-	entryName := s.entryName(addr.GrainType, addr.ID, name)
+	entryName := s.entryName(ident.GrainType, ident.ID, name)
 	if e, ok := s.timerEntries[entryName]; ok {
 		if !e.canceled {
 			return grainservices.ErrTimerAlreadyRegistered
 		}
 	}
 	entry := &timerEntry{
-		grainAddr: addr,
+		grainAddr: ident,
 		name:      name,
 		triggerAt: s.nowProvider().Add(d),
 	}
@@ -214,10 +214,10 @@ func (s *timerServiceImpl) register(addr grain.Identity, name string, d time.Dur
 	return nil
 }
 
-func (s *timerServiceImpl) cancel(addr grain.Identity, name string) bool {
-	s.log.V(4).Info("processing cancel", "address", addr, "name", name)
+func (s *timerServiceImpl) cancel(ident grain.Identity, name string) bool {
+	s.log.V(4).Info("processing cancel", "identity", ident, "name", name)
 
-	entryName := s.entryName(addr.GrainType, addr.ID, name)
+	entryName := s.entryName(ident.GrainType, ident.ID, name)
 	entry, ok := s.timerEntries[entryName]
 
 	if !ok {
@@ -256,13 +256,13 @@ func (h *timerEntryHeap) Pop() interface{} {
 }
 
 type grainTimerServiceImpl struct {
-	grainAddress grain.Identity
-	timerService timer.TimerService
-	timers       map[string]func()
+	grainIdentity grain.Identity
+	timerService  timer.TimerService
+	timers        map[string]func()
 }
 
 func (g *grainTimerServiceImpl) RegisterTimer(name string, d time.Duration, f func()) error {
-	if err := g.timerService.RegisterTimer(g.grainAddress, name, d); err != nil {
+	if err := g.timerService.RegisterTimer(g.grainIdentity, name, d); err != nil {
 		return err
 	}
 	g.timers[name] = f
@@ -270,7 +270,7 @@ func (g *grainTimerServiceImpl) RegisterTimer(name string, d time.Duration, f fu
 }
 
 func (g *grainTimerServiceImpl) RegisterTicker(name string, d time.Duration, f func()) error {
-	if err := g.timerService.RegisterTicker(g.grainAddress, name, d); err != nil {
+	if err := g.timerService.RegisterTicker(g.grainIdentity, name, d); err != nil {
 		return err
 	}
 	g.timers[name] = f
@@ -287,7 +287,7 @@ func (g *grainTimerServiceImpl) Trigger(name string) {
 func (g *grainTimerServiceImpl) Cancel(name string) bool {
 	if _, ok := g.timers[name]; ok {
 		delete(g.timers, name)
-		return g.timerService.Cancel(g.grainAddress, name)
+		return g.timerService.Cancel(g.grainIdentity, name)
 	}
 	return false
 }

@@ -23,12 +23,12 @@ type GrainActivationManager interface {
 }
 
 type ActivateGrainRequest struct {
-	Address   grain.Identity
+	Identity  grain.Identity
 	Activator GenericGrainActivator
 }
 
 type EvictGrainRequest struct {
-	Address grain.Identity
+	Identity grain.Identity
 }
 
 type InvokeMethodRequest struct {
@@ -107,7 +107,7 @@ type grainActivationEvict struct {
 }
 
 type GrainActivation struct {
-	Address            grain.Identity
+	Identity           grain.Identity
 	Description        *GrainDescription
 	impl               interface{}
 	inbox              chan grainActivationMessage
@@ -154,18 +154,18 @@ func (g *GrainActivation) Start() {
 func (g *GrainActivation) start() {
 	go func() {
 		g.loop()
-		g.deactivateCallback(g.Address)
+		g.deactivateCallback(g.Identity)
 	}()
 }
 
 func (g *GrainActivation) loop() {
-	ctx := WithIdentityContext(context.Background(), g.Address)
-	observerManager := newGrainObserverManager(g.Address, g.observerStore, g.siloClient)
+	ctx := WithIdentityContext(context.Background(), g.Identity)
+	observerManager := newGrainObserverManager(g.Identity, g.observerStore, g.siloClient)
 
 	grainTimerService := &grainTimerServiceImpl{
-		grainAddress: g.Address,
-		timerService: g.timerService,
-		timers:       map[string]func(){},
+		grainIdentity: g.Identity,
+		timerService:  g.timerService,
+		timers:        map[string]func(){},
 	}
 
 	coreServices := &coreGrainService{
@@ -173,11 +173,11 @@ func (g *GrainActivation) loop() {
 		siloClient:         g.siloClient,
 	}
 
-	if err := g.resourceManager.Touch(g.Address); err != nil {
+	if err := g.resourceManager.Touch(g.Identity); err != nil {
 		return
 	}
 
-	activation, err := g.Description.Activation.Handler(g.impl, ctx, coreServices, observerManager, g.Address)
+	activation, err := g.Description.Activation.Handler(g.impl, ctx, coreServices, observerManager, g.Identity)
 	if err != nil {
 		panic(err)
 	}
@@ -185,7 +185,7 @@ LOOP:
 	for msg := range g.inbox {
 		switch msg.messageType {
 		case invokeMethod:
-			g.resourceManager.Touch(g.Address)
+			g.resourceManager.Touch(g.Identity)
 			req := msg.invokeMethod.req
 			m, err := g.findMethodDesc(req.Method)
 			if err != nil {
@@ -205,7 +205,7 @@ LOOP:
 				panic(err)
 			}
 		case registerObserver:
-			g.resourceManager.Touch(g.Address)
+			g.resourceManager.Touch(g.Identity)
 
 			req := msg.registerObserver.req
 			o, err := g.findObserableDesc("", req.Name)
@@ -215,7 +215,7 @@ LOOP:
 			_, err = observerManager.Add(ctx, o.Name, req.Observer, req.In)
 			g.siloClient.AckRegisterObserver(ctx, req.Observer, req.UUID, err)
 		case notifyObserver:
-			g.resourceManager.Touch(g.Address)
+			g.resourceManager.Touch(g.Identity)
 
 			req := msg.notifyObserver
 			o, err := g.findObserableDesc(req.ObservableType, req.Name)
@@ -263,10 +263,10 @@ func NewGrainActivationManager(registrar Registrar, silo *Silo) *GrainActivation
 		registrar:        registrar,
 		silo:             silo,
 	}
-	resourceManager := newResourceManager(8, func(addresses []grain.Identity) {
-		for _, a := range addresses {
+	resourceManager := newResourceManager(8, func(identityes []grain.Identity) {
+		for _, a := range identityes {
 			m.EnqueueEvictGrain(EvictGrainRequest{
-				Address: a,
+				Identity: a,
 			})
 		}
 	})
@@ -281,14 +281,14 @@ func NewGrainActivationManager(registrar Registrar, silo *Silo) *GrainActivation
 	return m
 }
 
-func (m *GrainActivationManagerImpl) activateGrainWithDefaultActivator(address grain.Identity) (*GrainActivation, error) {
-	grainDesc, activator, err := m.registrar.Lookup(address.GrainType)
+func (m *GrainActivationManagerImpl) activateGrainWithDefaultActivator(identity grain.Identity) (*GrainActivation, error) {
+	grainDesc, activator, err := m.registrar.Lookup(identity.GrainType)
 	if err != nil {
 		return nil, err
 	}
 
 	activation := &GrainActivation{
-		Address:            address,
+		Identity:           identity,
 		Description:        grainDesc,
 		impl:               activator,
 		inbox:              make(chan grainActivationMessage, 8),
@@ -303,14 +303,14 @@ func (m *GrainActivationManagerImpl) activateGrainWithDefaultActivator(address g
 	return activation, nil
 }
 
-func (m *GrainActivationManagerImpl) activateGrainWithActivator(address grain.Identity, activator interface{}) (*GrainActivation, error) {
-	grainDesc, _, err := m.registrar.Lookup(address.GrainType)
+func (m *GrainActivationManagerImpl) activateGrainWithActivator(identity grain.Identity, activator interface{}) (*GrainActivation, error) {
+	grainDesc, _, err := m.registrar.Lookup(identity.GrainType)
 	if err != nil {
 		return nil, err
 	}
 
 	activation := &GrainActivation{
-		Address:            address,
+		Identity:           identity,
 		Description:        grainDesc,
 		impl:               activator,
 		inbox:              make(chan grainActivationMessage, 8),
@@ -402,19 +402,19 @@ func (m *GrainActivationManagerImpl) EnqueueObserverNotification(req ObserverNot
 func (m *GrainActivationManagerImpl) ActivateGrain(req ActivateGrainRequest) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	_, ok := m.grainActivations[req.Address]
+	_, ok := m.grainActivations[req.Identity]
 	if !ok {
 		var activation *GrainActivation
 		var err error
 		if req.Activator == nil {
-			activation, err = m.activateGrainWithDefaultActivator(req.Address)
+			activation, err = m.activateGrainWithDefaultActivator(req.Identity)
 		} else {
-			activation, err = m.activateGrainWithActivator(req.Address, req.Activator)
+			activation, err = m.activateGrainWithActivator(req.Identity, req.Activator)
 		}
 		if err != nil {
 			return err
 		}
-		m.grainActivations[req.Address] = activation
+		m.grainActivations[req.Identity] = activation
 	}
 	return nil
 }
@@ -440,11 +440,11 @@ func (m *GrainActivationManagerImpl) EnqueueTimerTrigger(req TimerTriggerNotific
 }
 
 func (m *GrainActivationManagerImpl) EnqueueEvictGrain(req EvictGrainRequest) error {
-	activation, err := m.getActivation(req.Address, false)
+	activation, err := m.getActivation(req.Identity, false)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Evicting grain %s\n", req.Address.ID)
+	fmt.Printf("Evicting grain %s\n", req.Identity.ID)
 	msg := grainActivationMessage{
 		messageType: evictGrain,
 		evictGrain:  &grainActivationEvict{},

@@ -39,7 +39,7 @@ type ObservableDesc struct {
 	NotifyHandler NotifyObserverHandler
 }
 
-type ActivationHandler func(activator interface{}, ctx context.Context, coreServices grainservices.CoreGrainServices, o grainservices.GrainObserverManager, address grain.Identity) (grain.GrainReference, error)
+type ActivationHandler func(activator interface{}, ctx context.Context, coreServices grainservices.CoreGrainServices, o grainservices.GrainObserverManager, identity grain.Identity) (grain.GrainReference, error)
 type MethodHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) (interface{}, error)
 type ObservableHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) error
 type NotifyObserverHandler func(m grainservices.GrainObserverManager, ctx context.Context, o []grain.RegisteredObserver) error
@@ -81,7 +81,7 @@ func NewSilo(log logr.Logger, observerStore observer.Store, registrar Registrar)
 			Name:     name,
 		})
 		if err != nil {
-			s.log.V(1).Error(err, "failed to trigger timer notification", "address", grainAddr, "triggerName", name)
+			s.log.V(1).Error(err, "failed to trigger timer notification", "identity", grainAddr, "triggerName", name)
 		}
 	})
 	s.timerService.Start()
@@ -96,15 +96,15 @@ func (s *Silo) Register(desc *GrainDescription, activator interface{}) {
 }
 
 func (s *Silo) CreateGrain(activator GenericGrainActivator) (grain.Identity, error) {
-	address := grain.Identity{
+	identity := grain.Identity{
 		GrainType: "Grain",
 		ID:        ksuid.New().String(),
 	}
 	err := s.localGrainManager.ActivateGrain(ActivateGrainRequest{
-		Address:   address,
+		Identity:  identity,
 		Activator: activator,
 	})
-	return address, err
+	return identity, err
 }
 
 type siloClientImpl struct {
@@ -148,7 +148,7 @@ func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver grain.Identi
 	sender := IdentityFromContext(ctx)
 	if sender == nil {
 		log.Info("no sender in context")
-		// TODO: generate anonymous address
+		// TODO: generate anonymous identity
 		panic("no sender")
 	}
 	bytes, err := proto.Marshal(in)

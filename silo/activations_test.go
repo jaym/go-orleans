@@ -25,9 +25,9 @@ import (
 type ChirperGrainActivatorTestImpl struct {
 }
 
-func (*ChirperGrainActivatorTestImpl) Activate(ctx context.Context, address grain.Identity, services examples.ChirperGrainServices) (examples.ChirperGrain, error) {
+func (*ChirperGrainActivatorTestImpl) Activate(ctx context.Context, identity grain.Identity, services examples.ChirperGrainServices) (examples.ChirperGrain, error) {
 	g := &ChirperGrainImpl{
-		Identity: address,
+		Identity: identity,
 		services: services,
 	}
 
@@ -37,10 +37,10 @@ func (*ChirperGrainActivatorTestImpl) Activate(ctx context.Context, address grai
 		fmt.Printf("Got timer: %v\n", g.Identity)
 	})
 
-	if address.ID == "u2" {
-		g1Address := address
-		g1Address.ID = "u1"
-		g1 := examples.GetChirperGrain(services.CoreGrainServices().SiloClient(), g1Address)
+	if identity.ID == "u2" {
+		g1Identity := identity
+		g1Identity.ID = "u1"
+		g1 := examples.GetChirperGrain(services.CoreGrainServices().SiloClient(), g1Identity)
 		g1.ObserveMessage(ctx, g, &examples.SubscribeRequest{})
 	}
 	return g, nil
@@ -155,25 +155,25 @@ func TestItAll(t *testing.T) {
 		}
 	}
 
-	g1Address := grain.Identity{
+	g1Identity := grain.Identity{
 		GrainType: "ChirperGrain",
 		ID:        "u1",
 	}
 
-	g2Address := grain.Identity{
+	g2Identity := grain.Identity{
 		GrainType: "ChirperGrain",
 		ID:        "u2",
 	}
 
-	chirperGrain1Ref := examples.GetChirperGrain(s.Client(), g1Address)
-	chirperGrain2Ref := examples.GetChirperGrain(s.Client(), g2Address)
-	address, err := examples.CreateChirperGrainMessageObserver(context.Background(), s,
+	chirperGrain1Ref := examples.GetChirperGrain(s.Client(), g1Identity)
+	chirperGrain2Ref := examples.GetChirperGrain(s.Client(), g2Identity)
+	identity, err := examples.CreateChirperGrainMessageObserver(context.Background(), s,
 		func(ctx context.Context, req *examples.ChirpMessage) error {
 			fmt.Printf("anonymous grain got notification: %q\n", req.Msg)
 			return nil
 		})
 	require.NoError(t, err)
-	err = chirperGrain1Ref.ObserveMessage(context.Background(), address, &examples.SubscribeRequest{})
+	err = chirperGrain1Ref.ObserveMessage(context.Background(), identity, &examples.SubscribeRequest{})
 	require.NoError(t, err)
 
 	resp, err := chirperGrain2Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)

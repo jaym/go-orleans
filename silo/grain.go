@@ -10,8 +10,8 @@ import (
 var grain_GrainDesc = GrainDescription{
 	GrainType: "Grain",
 	Activation: ActivationDesc{
-		Handler: func(activator interface{}, ctx context.Context, coreServices grainservices.CoreGrainServices, o grainservices.GrainObserverManager, address grain.Identity) (grain.GrainReference, error) {
-			return activator.(GenericGrainActivator).Activate(ctx, address)
+		Handler: func(activator interface{}, ctx context.Context, coreServices grainservices.CoreGrainServices, o grainservices.GrainObserverManager, identity grain.Identity) (grain.GrainReference, error) {
+			return activator.(GenericGrainActivator).Activate(ctx, identity)
 		},
 	},
 }

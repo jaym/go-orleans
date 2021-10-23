@@ -23,7 +23,7 @@ type RegisterObserverFuture interface {
 }
 
 type SiloClient interface {
-	InvokeMethod(ctx context.Context, toAddress Identity, grainType string, method string,
+	InvokeMethod(ctx context.Context, toIdentity Identity, grainType string, method string,
 		in proto.Message) InvokeMethodFuture
 
 	RegisterObserver(ctx context.Context, observer Identity, observable Identity, name string, in proto.Message) RegisterObserverFuture

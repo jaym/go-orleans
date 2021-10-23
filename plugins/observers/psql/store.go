@@ -102,19 +102,19 @@ func (s *PSQLStore) List(ctx context.Context, owner grain.Identity, observableNa
 			}
 			continue
 		}
-		addr := grain.Identity{}
-		if err := addr.UnmarshalText([]byte(r.ObserverGrain)); err != nil {
-			log.V(0).Error(err, "invald observer address", "id", r.ID, "observer", r.ObserverGrain)
+		ident := grain.Identity{}
+		if err := ident.UnmarshalText([]byte(r.ObserverGrain)); err != nil {
+			log.V(0).Error(err, "invald observer identity", "id", r.ID, "observer", r.ObserverGrain)
 			return nil, err
 		}
-		observer := newRegisteredObserver(s.codec, addr, r.ObservableName, r.Val)
+		observer := newRegisteredObserver(s.codec, ident, r.ObservableName, r.Val)
 		observers = append(observers, observer)
 	}
 
 	return observers, nil
 }
 
-func (s *PSQLStore) Add(ctx context.Context, owner grain.Identity, observableName string, observerAddress grain.Identity, opts ...observer.AddOption) error {
+func (s *PSQLStore) Add(ctx context.Context, owner grain.Identity, observableName string, observerIdentity grain.Identity, opts ...observer.AddOption) error {
 	options := observer.AddOptions{}
 	observer.ReadAddOptions(&options, opts)
 
@@ -137,7 +137,7 @@ func (s *PSQLStore) Add(ctx context.Context, owner grain.Identity, observableNam
 		q := s.q.WithTx(tx)
 		id, err := q.UpsertObserver(ctx, internal.UpsertObserverParams{
 			OwnerGrain:     owner.String(),
-			ObserverGrain:  observerAddress.String(),
+			ObserverGrain:  observerIdentity.String(),
 			ObservableName: observableName,
 			Expires:        expires,
 		})

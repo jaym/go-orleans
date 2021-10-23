@@ -58,7 +58,7 @@ func TestPsqlStore(t *testing.T) {
 
 	ctx := context.Background()
 
-	addrs := []grain.Identity{
+	idents := []grain.Identity{
 		{
 			GrainType: "type1",
 			ID:        "id1",
@@ -81,38 +81,38 @@ func TestPsqlStore(t *testing.T) {
 		},
 	}
 
-	err = store.Add(ctx, addrs[0], "observable1", addrs[1])
+	err = store.Add(ctx, idents[0], "observable1", idents[1])
 	require.NoError(t, err)
-	err = store.Add(ctx, addrs[0], "observable1", addrs[2])
+	err = store.Add(ctx, idents[0], "observable1", idents[2])
 	require.NoError(t, err)
-	err = store.Add(ctx, addrs[0], "observable1", addrs[3])
+	err = store.Add(ctx, idents[0], "observable1", idents[3])
 	require.NoError(t, err)
-	err = store.Add(ctx, addrs[0], "observable2", addrs[3])
+	err = store.Add(ctx, idents[0], "observable2", idents[3])
 	require.NoError(t, err)
-	err = store.Add(ctx, addrs[0], "observable2", addrs[4])
+	err = store.Add(ctx, idents[0], "observable2", idents[4])
 	require.NoError(t, err)
 
-	observables, err := store.List(ctx, addrs[0], "observable1")
+	observables, err := store.List(ctx, idents[0], "observable1")
 	require.NoError(t, err)
 	require.Len(t, observables, 3)
 
-	err = store.Add(ctx, addrs[0], "observable1", addrs[1], observer.AddWithExpiration(time.Now().Add(-1*time.Minute)))
+	err = store.Add(ctx, idents[0], "observable1", idents[1], observer.AddWithExpiration(time.Now().Add(-1*time.Minute)))
 	require.NoError(t, err)
-	observables, err = store.List(ctx, addrs[0], "observable1")
-	require.NoError(t, err)
-	require.Len(t, observables, 2)
-
-	observables, err = store.List(ctx, addrs[0], "observable2")
+	observables, err = store.List(ctx, idents[0], "observable1")
 	require.NoError(t, err)
 	require.Len(t, observables, 2)
 
-	observables, err = store.List(ctx, addrs[1], "observable1")
+	observables, err = store.List(ctx, idents[0], "observable2")
+	require.NoError(t, err)
+	require.Len(t, observables, 2)
+
+	observables, err = store.List(ctx, idents[1], "observable1")
 	require.NoError(t, err)
 	require.Len(t, observables, 0)
 
-	err = store.Add(ctx, addrs[0], "observable3", addrs[4], observer.AddWithVal("teststring"))
+	err = store.Add(ctx, idents[0], "observable3", idents[4], observer.AddWithVal("teststring"))
 	require.NoError(t, err)
-	observables, err = store.List(ctx, addrs[0], "observable3")
+	observables, err = store.List(ctx, idents[0], "observable3")
 	require.NoError(t, err)
 	require.Len(t, observables, 1)
 	var s string
@@ -120,19 +120,19 @@ func TestPsqlStore(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "teststring", s)
 
-	err = store.Remove(ctx, addrs[0], observer.RemoveByObserverGrain(addrs[1]))
+	err = store.Remove(ctx, idents[0], observer.RemoveByObserverGrain(idents[1]))
 	require.NoError(t, err)
-	observables, err = store.List(ctx, addrs[0], "observable1")
+	observables, err = store.List(ctx, idents[0], "observable1")
 	require.NoError(t, err)
 	require.Len(t, observables, 2)
 
-	err = store.Remove(ctx, addrs[0], observer.RemoveByObservableName("observable1"))
+	err = store.Remove(ctx, idents[0], observer.RemoveByObservableName("observable1"))
 	require.NoError(t, err)
-	observables, err = store.List(ctx, addrs[0], "observable1")
+	observables, err = store.List(ctx, idents[0], "observable1")
 	require.NoError(t, err)
 	require.Len(t, observables, 0)
 
-	observables, err = store.List(ctx, addrs[0], "observable2")
+	observables, err = store.List(ctx, idents[0], "observable2")
 	require.NoError(t, err)
 	require.Len(t, observables, 2)
 }

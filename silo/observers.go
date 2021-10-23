@@ -14,14 +14,14 @@ type EncodedRegisteredObserver struct {
 	val            []byte
 }
 
-func NewRegisteredObserver(address grain.Identity, observableName string, val interface{}) (*EncodedRegisteredObserver, error) {
+func NewRegisteredObserver(identity grain.Identity, observableName string, val interface{}) (*EncodedRegisteredObserver, error) {
 	// TODO: should not need to marshal
 	data, err := proto.Marshal(val.(proto.Message))
 	if err != nil {
 		return nil, err
 	}
 	return &EncodedRegisteredObserver{
-		Identity:       address,
+		Identity:       identity,
 		observableName: observableName,
 		val:            data,
 	}, nil
@@ -77,19 +77,19 @@ func (m *grainObserverManager) List(ctx context.Context, observableName string) 
 	return m.registeredObservers[observableName], nil
 }
 
-func (m *grainObserverManager) Add(ctx context.Context, observableName string, address grain.Identity, val interface{}) (grain.RegisteredObserver, error) {
+func (m *grainObserverManager) Add(ctx context.Context, observableName string, identity grain.Identity, val interface{}) (grain.RegisteredObserver, error) {
 	if err := m.ensureLoaded(ctx); err != nil {
 		return nil, err
 	}
 
-	o, err := NewRegisteredObserver(address, observableName, val)
+	o, err := NewRegisteredObserver(identity, observableName, val)
 	if err != nil {
 		return nil, err
 	}
 	observables := m.registeredObservers[observableName]
 	for i := range observables {
-		if observables[i].GetIdentity() == address {
-			err := m.store.Add(ctx, m.owner, observableName, address, observer.AddWithVal(val))
+		if observables[i].GetIdentity() == identity {
+			err := m.store.Add(ctx, m.owner, observableName, identity, observer.AddWithVal(val))
 			if err != nil {
 				return nil, err
 			}
@@ -99,7 +99,7 @@ func (m *grainObserverManager) Add(ctx context.Context, observableName string, a
 		}
 	}
 
-	if err := m.store.Add(ctx, m.owner, observableName, address, observer.AddWithVal(val)); err != nil {
+	if err := m.store.Add(ctx, m.owner, observableName, identity, observer.AddWithVal(val)); err != nil {
 		return nil, err
 	}
 	m.registeredObservers[observableName] = append(m.registeredObservers[observableName], o)

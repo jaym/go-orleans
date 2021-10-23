@@ -8,7 +8,7 @@ import (
 	"github.com/jaym/go-orleans/grain"
 )
 
-type EvictTrigger func(addresses []grain.Identity)
+type EvictTrigger func(identityes []grain.Identity)
 
 var ErrNoCapacity = errors.New("No capacity")
 
@@ -105,8 +105,8 @@ func (r *resourceManager) Remove(grainAddr grain.Identity) error {
 
 func (r *resourceManager) start() {
 	go func() {
-		for addresesToEvict := range r.evictChan {
-			r.evictTrigger(addresesToEvict)
+		for identesesToEvict := range r.evictChan {
+			r.evictTrigger(identesesToEvict)
 			time.Sleep(1 * time.Second)
 		}
 	}()
@@ -205,15 +205,15 @@ func (r *resourceManager) evict() int {
 	}
 	numEvicted := 0
 	element := r.recencyList.Back()
-	addresesToEvict := make([]grain.Identity, 0, desiredEviction)
+	identesesToEvict := make([]grain.Identity, 0, desiredEviction)
 	for element != nil && numEvicted < desiredEviction {
 		entry := element.Value.(*resourceManagerEntry)
-		addresesToEvict = append(addresesToEvict, entry.grainAddr)
+		identesesToEvict = append(identesesToEvict, entry.grainAddr)
 		numEvicted++
 		element = element.Prev()
 	}
 	select {
-	case r.evictChan <- addresesToEvict:
+	case r.evictChan <- identesesToEvict:
 		return numEvicted
 	default:
 		return 0

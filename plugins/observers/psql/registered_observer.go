@@ -12,9 +12,9 @@ type registeredObserver struct {
 	val            []byte
 }
 
-func newRegisteredObserver(codec codec.Codec, address grain.Identity, observableName string, val []byte) *registeredObserver {
+func newRegisteredObserver(codec codec.Codec, identity grain.Identity, observableName string, val []byte) *registeredObserver {
 	return &registeredObserver{
-		Identity:       address,
+		Identity:       identity,
 		observableName: observableName,
 		codec:          codec,
 		val:            val,

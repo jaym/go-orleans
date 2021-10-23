@@ -16,6 +16,6 @@ func IdentityFromContext(ctx context.Context) *grain.Identity {
 	return nil
 }
 
-func WithIdentityContext(ctx context.Context, address grain.Identity) context.Context {
-	return context.WithValue(ctx, identityCtxKey, address)
+func WithIdentityContext(ctx context.Context, identity grain.Identity) context.Context {
+	return context.WithValue(ctx, identityCtxKey, identity)
 }
