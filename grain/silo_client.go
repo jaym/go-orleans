@@ -23,11 +23,11 @@ type RegisterObserverFuture interface {
 }
 
 type SiloClient interface {
-	InvokeMethod(ctx context.Context, toAddress Address, grainType string, method string,
+	InvokeMethod(ctx context.Context, toAddress Identity, grainType string, method string,
 		in proto.Message) InvokeMethodFuture
 
-	RegisterObserver(ctx context.Context, observer Address, observable Address, name string, in proto.Message) RegisterObserverFuture
-	AckRegisterObserver(ctx context.Context, receiver Address, uuid string, errOut error) error
-	SendResponse(ctx context.Context, receiver Address, uuid string, out proto.Message) error
-	NotifyObservers(ctx context.Context, observableType string, observableName string, receiver []Address, out proto.Message) error
+	RegisterObserver(ctx context.Context, observer Identity, observable Identity, name string, in proto.Message) RegisterObserverFuture
+	AckRegisterObserver(ctx context.Context, receiver Identity, uuid string, errOut error) error
+	SendResponse(ctx context.Context, receiver Identity, uuid string, out proto.Message) error
+	NotifyObservers(ctx context.Context, observableType string, observableName string, receiver []Identity, out proto.Message) error
 }

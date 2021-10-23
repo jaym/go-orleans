@@ -16,8 +16,8 @@ const (
 var (
 	contextType              = contextPackage.Ident("Context")
 	siloClientType           = grainPackage.Ident("SiloClient")
-	addressableType          = grainPackage.Ident("Addressable")
-	addressType              = grainPackage.Ident("Address")
+	grainRefType             = grainPackage.Ident("GrainReference")
+	identityType             = grainPackage.Ident("Identity")
 	registeredObserverType   = grainPackage.Ident("RegisteredObserver")
 	grainObserverManagerType = grainServicesPackage.Ident("GrainObserverManager")
 	coreGrainServicesType    = grainServicesPackage.Ident("CoreGrainServices")
@@ -56,7 +56,7 @@ func isObservable(m *protogen.Method) bool {
 
 func writeGrainInterface(g *protogen.GeneratedFile, svc *protogen.Service) {
 	g.P("type ", svc.GoName, "Grain interface {")
-	g.P(addressableType)
+	g.P(grainRefType)
 	for _, m := range svc.Methods {
 		if !isObservable(m) {
 			g.P(grainInterfaceMethodSignature(g, m))
@@ -98,7 +98,7 @@ func generateGrainObserver(g *protogen.GeneratedFile, m *protogen.Method) {
 
 func writeGrainObserverInterface(g *protogen.GeneratedFile, m *protogen.Method) {
 	g.P("type ", observerRefName(m), " interface {")
-	g.P(addressableType)
+	g.P(grainRefType)
 	g.P("OnNotify", m.GoName, "(",
 		"ctx ", g.QualifiedGoIdent(contextType), ", ",
 		"req *", g.QualifiedGoIdent(m.Output.GoIdent),
@@ -135,22 +135,22 @@ func writeGrainObserverActivator(g *protogen.GeneratedFile, m *protogen.Method) 
 		"s *", g.QualifiedGoIdent(siloPackage.Ident("Silo")), ", ",
 		"f func(", "ctx ", g.QualifiedGoIdent(contextType), ", ",
 		"req *", g.QualifiedGoIdent(m.Output.GoIdent),
-		") error", ") (", g.QualifiedGoIdent(addressableType), ", error) {",
+		") error", ") (", g.QualifiedGoIdent(grainRefType), ", error) {",
 	)
 
-	g.P("address, err := s.CreateGrain(&", observerActivatorName(m), " {")
+	g.P("identity, err := s.CreateGrain(&", observerActivatorName(m), " {")
 	g.P("f: f,")
 	g.P("})")
 	g.P("if err != nil {")
 	g.P("return nil, err")
 	g.P("}")
-	g.P("return address, nil")
+	g.P("return identity, nil")
 
 	g.P("}")
 	g.P()
 
 	g.P("type ", anonymousObserverImplName(m), " struct {")
-	g.P(g.QualifiedGoIdent(addressType))
+	g.P(g.QualifiedGoIdent(identityType))
 	g.P("f func(", "ctx ", g.QualifiedGoIdent(contextType), ", ",
 		"req *", g.QualifiedGoIdent(m.Output.GoIdent),
 		") error")
@@ -174,11 +174,11 @@ func writeGrainObserverActivator(g *protogen.GeneratedFile, m *protogen.Method) 
 
 	g.P("func (a *", observerActivatorName(m), ") Activate(",
 		"ctx ", g.QualifiedGoIdent(contextType), ", ",
-		"address ", g.QualifiedGoIdent(addressType), ") (",
-		g.QualifiedGoIdent(addressableType), ", error) {",
+		"identity ", g.QualifiedGoIdent(identityType), ") (",
+		g.QualifiedGoIdent(grainRefType), ", error) {",
 	)
 	g.P("return &", anonymousObserverImplName(m), "{")
-	g.P("Address: address,")
+	g.P("Identity: identity,")
 	g.P("f: a.f,")
 	g.P("}, nil")
 
@@ -188,7 +188,7 @@ func writeGrainObserverActivator(g *protogen.GeneratedFile, m *protogen.Method) 
 
 func writeGrainRefInterface(g *protogen.GeneratedFile, svc *protogen.Service) {
 	g.P("type ", svc.GoName, "GrainRef interface {")
-	g.P(addressableType)
+	g.P(grainRefType)
 	g.P(svc.GoName, "Grain")
 	for _, m := range svc.Methods {
 		if isObservable(m) {
@@ -217,7 +217,7 @@ func grainRefInterfaceObserverSignature(g *protogen.GeneratedFile, m *protogen.M
 	builder.WriteString(g.QualifiedGoIdent(contextType))
 	builder.WriteString(", ")
 	builder.WriteString("observer ")
-	builder.WriteString(g.QualifiedGoIdent(addressableType))
+	builder.WriteString(g.QualifiedGoIdent(grainRefType))
 	builder.WriteString(", ")
 	builder.WriteString("req *")
 	builder.WriteString(g.QualifiedGoIdent(m.Input.GoIdent))
@@ -300,7 +300,7 @@ func writeGrainActivatorInterface(g *protogen.GeneratedFile, svc *protogen.Servi
 	g.P("type ", svc.GoName, "GrainActivator interface {")
 	g.P("Activate(",
 		"ctx ", g.QualifiedGoIdent(contextType), ", ",
-		"address ", g.QualifiedGoIdent(addressType), ", ",
+		"identity ", g.QualifiedGoIdent(identityType), ", ",
 		"services ", svc.GoName, "GrainServices", ") (",
 		svc.GoName, "Grain, error)",
 	)
@@ -343,15 +343,15 @@ func writeActivateHandler(g *protogen.GeneratedFile, svc *protogen.Service) {
 		"ctx ", g.QualifiedGoIdent(contextType), ", ",
 		"coreServices ", g.QualifiedGoIdent(coreGrainServicesType), ", ",
 		"observerManager ", g.QualifiedGoIdent(grainObserverManagerType), ", ",
-		"address ", g.QualifiedGoIdent(addressType), ") (",
-		g.QualifiedGoIdent(addressableType), ", error) {",
+		"identity ", g.QualifiedGoIdent(identityType), ") (",
+		g.QualifiedGoIdent(grainRefType), ", error) {",
 	)
 
 	g.P("grainServices := &", "impl_", svc.GoName, "GrainServices {")
 	g.P("observerManager: observerManager,")
 	g.P("coreServices: coreServices,")
 	g.P("}")
-	g.P("return activator.(", svc.GoName, "GrainActivator)", ".Activate(ctx, address, grainServices)")
+	g.P("return activator.(", svc.GoName, "GrainActivator)", ".Activate(ctx, identity, grainServices)")
 
 	g.P("}")
 	g.P()
@@ -464,17 +464,17 @@ func clientName(svc *protogen.Service) string {
 
 func generateGrainClient(g *protogen.GeneratedFile, svc *protogen.Service) {
 	g.P("type ", clientName(svc), " struct {")
-	g.P(addressType)
+	g.P(identityType)
 	g.P("siloClient ", g.QualifiedGoIdent(siloClientType))
 	g.P("}")
 
 	g.P("func Get", svc.GoName, "Grain(",
 		"siloClient ", g.QualifiedGoIdent(siloClientType), ", ",
-		"address ", g.QualifiedGoIdent(addressType),
+		"identity ", g.QualifiedGoIdent(identityType),
 		") ChirperGrainRef {",
 	)
 	g.P("return &", clientName(svc), "{")
-	g.P("Address: address,")
+	g.P("Identity: identity,")
 	g.P("siloClient: siloClient,")
 	g.P("}")
 
@@ -496,7 +496,7 @@ func generateGrainClient(g *protogen.GeneratedFile, svc *protogen.Service) {
 
 func writeGrainClientMethod(g *protogen.GeneratedFile, methodIdx int, m *protogen.Method) {
 	g.P("func (c *", clientName(m.Parent), ") ", grainInterfaceMethodSignature(g, m), "{")
-	g.P("f := c.siloClient.InvokeMethod(ctx, c.Address,", m.Parent.GoName, "Grain_GrainDesc.GrainType, ", m.Parent.GoName, "Grain_GrainDesc.Methods[", methodIdx, "].Name, req)")
+	g.P("f := c.siloClient.InvokeMethod(ctx, c.Identity,", m.Parent.GoName, "Grain_GrainDesc.GrainType, ", m.Parent.GoName, "Grain_GrainDesc.Methods[", methodIdx, "].Name, req)")
 
 	g.P("resp, err := f.Await(ctx)")
 	g.P("if err != nil {")
@@ -516,7 +516,7 @@ func writeGrainClientMethod(g *protogen.GeneratedFile, methodIdx int, m *protoge
 func writeGrainClientRegisterObserver(g *protogen.GeneratedFile, observableIdx int, m *protogen.Method) {
 	//grainRefInterfaceObserverSignature
 	g.P("func (c *", clientName(m.Parent), ") ", grainRefInterfaceObserverSignature(g, m), "{")
-	g.P("f := c.siloClient.RegisterObserver(ctx, observer.GetAddress(), c.GetAddress(), ", m.Parent.GoName, "Grain_GrainDesc.Observables[0].Name, req)")
+	g.P("f := c.siloClient.RegisterObserver(ctx, observer.GetIdentity(), c.GetIdentity(), ", m.Parent.GoName, "Grain_GrainDesc.Observables[0].Name, req)")
 
 	g.P("err := f.Await(ctx)")
 	g.P("if err != nil {")

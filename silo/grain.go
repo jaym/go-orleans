@@ -10,14 +10,14 @@ import (
 var grain_GrainDesc = GrainDescription{
 	GrainType: "Grain",
 	Activation: ActivationDesc{
-		Handler: func(activator interface{}, ctx context.Context, coreServices grainservices.CoreGrainServices, o grainservices.GrainObserverManager, address grain.Address) (grain.Addressable, error) {
+		Handler: func(activator interface{}, ctx context.Context, coreServices grainservices.CoreGrainServices, o grainservices.GrainObserverManager, address grain.Identity) (grain.GrainReference, error) {
 			return activator.(GenericGrainActivator).Activate(ctx, address)
 		},
 	},
 }
 
 type GenericGrainActivator interface {
-	Activate(context.Context, grain.Address) (grain.Addressable, error)
+	Activate(context.Context, grain.Identity) (grain.GrainReference, error)
 }
 
 type coreGrainService struct {

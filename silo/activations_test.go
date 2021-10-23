@@ -25,16 +25,16 @@ import (
 type ChirperGrainActivatorTestImpl struct {
 }
 
-func (*ChirperGrainActivatorTestImpl) Activate(ctx context.Context, address grain.Address, services examples.ChirperGrainServices) (examples.ChirperGrain, error) {
+func (*ChirperGrainActivatorTestImpl) Activate(ctx context.Context, address grain.Identity, services examples.ChirperGrainServices) (examples.ChirperGrain, error) {
 	g := &ChirperGrainImpl{
-		Address:  address,
+		Identity: address,
 		services: services,
 	}
 
 	coreServices := services.CoreGrainServices()
 
 	coreServices.TimerService().RegisterTimer("hello", time.Second, func() {
-		fmt.Printf("Got timer: %v\n", g.Address)
+		fmt.Printf("Got timer: %v\n", g.Identity)
 	})
 
 	if address.ID == "u2" {
@@ -47,12 +47,12 @@ func (*ChirperGrainActivatorTestImpl) Activate(ctx context.Context, address grai
 }
 
 type ChirperGrainImpl struct {
-	grain.Address
+	grain.Identity
 	services examples.ChirperGrainServices
 }
 
 func (g *ChirperGrainImpl) PublishMessage(ctx context.Context, req *examples.PublishMessageRequest) (*examples.PublishMessageResponse, error) {
-	fmt.Printf("%v got message %q\n", g.Address, req.Msg)
+	fmt.Printf("%v got message %q\n", g.Identity, req.Msg)
 	observers, err := g.services.ListMessageObservers(ctx)
 	if err != nil {
 		return nil, err
@@ -68,12 +68,12 @@ func (g *ChirperGrainImpl) PublishMessage(ctx context.Context, req *examples.Pub
 	}, nil
 }
 func (g *ChirperGrainImpl) OnNotifyMessage(ctx context.Context, req *examples.ChirpMessage) error {
-	fmt.Printf("%v got notification %q\n", g.Address, req.Msg)
+	fmt.Printf("%v got notification %q\n", g.Identity, req.Msg)
 	return nil
 }
 
 func (g *ChirperGrainImpl) Deactivate(ctx context.Context) {
-	fmt.Printf("Deactivating %v\n", g.Address)
+	fmt.Printf("Deactivating %v\n", g.Identity)
 }
 
 type registrarEntry struct {
@@ -143,29 +143,24 @@ func TestItAll(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		a := grain.Address{
-			Location:  "local",
+		a := grain.Identity{
 			GrainType: "ChirperGrain",
 			ID:        fmt.Sprintf("g%d", i),
 		}
 		ref := examples.GetChirperGrain(s.Client(), a)
 		fmt.Printf("Calling g%d\n", i)
-		_, err := ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
-			Location: "local",
-		}), in)
+		_, err := ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
 		if err != nil {
 			fmt.Printf("%v\n", err)
 		}
 	}
 
-	g1Address := grain.Address{
-		Location:  "local",
+	g1Address := grain.Identity{
 		GrainType: "ChirperGrain",
 		ID:        "u1",
 	}
 
-	g2Address := grain.Address{
-		Location:  "local",
+	g2Address := grain.Identity{
 		GrainType: "ChirperGrain",
 		ID:        "u2",
 	}
@@ -181,32 +176,20 @@ func TestItAll(t *testing.T) {
 	err = chirperGrain1Ref.ObserveMessage(context.Background(), address, &examples.SubscribeRequest{})
 	require.NoError(t, err)
 
-	resp, err := chirperGrain2Ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
-		Location: "local",
-	}), in)
+	resp, err := chirperGrain2Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
 
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
-		Location: "local",
-	}), in)
+	resp, err = chirperGrain1Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
 	require.Equal(t, "hello world", resp.Foobar)
 
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
-		Location: "local",
-	}), in)
+	resp, err = chirperGrain1Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
-		Location: "local",
-	}), in)
+	resp, err = chirperGrain1Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
-		Location: "local",
-	}), in)
+	resp, err = chirperGrain1Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithAddressContext(context.Background(), grain.Address{
-		Location: "local",
-	}), in)
+	resp, err = chirperGrain1Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
 
 	time.Sleep(3 * time.Second)

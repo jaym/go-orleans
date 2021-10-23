@@ -9,19 +9,19 @@ import (
 )
 
 type EncodedRegisteredObserver struct {
-	grain.Address
+	grain.Identity
 	observableName string
 	val            []byte
 }
 
-func NewRegisteredObserver(address grain.Address, observableName string, val interface{}) (*EncodedRegisteredObserver, error) {
+func NewRegisteredObserver(address grain.Identity, observableName string, val interface{}) (*EncodedRegisteredObserver, error) {
 	// TODO: should not need to marshal
 	data, err := proto.Marshal(val.(proto.Message))
 	if err != nil {
 		return nil, err
 	}
 	return &EncodedRegisteredObserver{
-		Address:        address,
+		Identity:       address,
 		observableName: observableName,
 		val:            data,
 	}, nil
@@ -38,12 +38,12 @@ func (o *EncodedRegisteredObserver) ObservableName() string {
 type grainObserverManager struct {
 	registeredObservers map[string][]grain.RegisteredObserver
 	siloClient          grain.SiloClient
-	owner               grain.Address
+	owner               grain.Identity
 	store               observer.Store
 	loaded              bool
 }
 
-func newGrainObserverManager(owner grain.Address, store observer.Store, siloClient grain.SiloClient) *grainObserverManager {
+func newGrainObserverManager(owner grain.Identity, store observer.Store, siloClient grain.SiloClient) *grainObserverManager {
 	m := &grainObserverManager{
 		owner:               owner,
 		siloClient:          siloClient,
@@ -77,7 +77,7 @@ func (m *grainObserverManager) List(ctx context.Context, observableName string) 
 	return m.registeredObservers[observableName], nil
 }
 
-func (m *grainObserverManager) Add(ctx context.Context, observableName string, address grain.Address, val interface{}) (grain.RegisteredObserver, error) {
+func (m *grainObserverManager) Add(ctx context.Context, observableName string, address grain.Identity, val interface{}) (grain.RegisteredObserver, error) {
 	if err := m.ensureLoaded(ctx); err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (m *grainObserverManager) Add(ctx context.Context, observableName string, a
 	}
 	observables := m.registeredObservers[observableName]
 	for i := range observables {
-		if observables[i].GetAddress() == address {
+		if observables[i].GetIdentity() == address {
 			err := m.store.Add(ctx, m.owner, observableName, address, observer.AddWithVal(val))
 			if err != nil {
 				return nil, err
@@ -112,9 +112,9 @@ func (m *grainObserverManager) Notify(ctx context.Context, observableName string
 		return err
 	}
 
-	receivers := make([]grain.Address, len(observers))
+	receivers := make([]grain.Identity, len(observers))
 	for i := range observers {
-		receivers[i] = observers[i].GetAddress()
+		receivers[i] = observers[i].GetIdentity()
 	}
 	return m.siloClient.NotifyObservers(ctx, m.owner.GrainType, observableName, receivers, val)
 }

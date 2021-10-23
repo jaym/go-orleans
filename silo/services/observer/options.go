@@ -32,13 +32,13 @@ func ReadAddOptions(options *AddOptions, opts []AddOption) {
 }
 
 type RemoveOptions struct {
-	ObserverGrain  *grain.Address
+	ObserverGrain  *grain.Identity
 	ObservableName *string
 }
 
 type RemoveOption func(*RemoveOptions)
 
-func RemoveByObserverGrain(observerAddress grain.Address) RemoveOption {
+func RemoveByObserverGrain(observerAddress grain.Identity) RemoveOption {
 	return func(o *RemoveOptions) {
 		o.ObserverGrain = &observerAddress
 	}

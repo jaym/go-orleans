@@ -80,8 +80,7 @@ func (s *PSQLStore) startBackgroundCleaner() {
 	}()
 }
 
-func (s *PSQLStore) List(ctx context.Context, owner grain.Address, observableName string) ([]grain.RegisteredObserver, error) {
-	owner.Location = ""
+func (s *PSQLStore) List(ctx context.Context, owner grain.Identity, observableName string) ([]grain.RegisteredObserver, error) {
 	log := s.log.WithValues("owner", owner.String(), "observableName", observableName)
 	rows, err := s.q.ListObservers(ctx, internal.ListObserversParams{
 		OwnerGrain:     owner.String(),
@@ -103,7 +102,7 @@ func (s *PSQLStore) List(ctx context.Context, owner grain.Address, observableNam
 			}
 			continue
 		}
-		addr := grain.Address{}
+		addr := grain.Identity{}
 		if err := addr.UnmarshalText([]byte(r.ObserverGrain)); err != nil {
 			log.V(0).Error(err, "invald observer address", "id", r.ID, "observer", r.ObserverGrain)
 			return nil, err
@@ -115,10 +114,7 @@ func (s *PSQLStore) List(ctx context.Context, owner grain.Address, observableNam
 	return observers, nil
 }
 
-func (s *PSQLStore) Add(ctx context.Context, owner grain.Address, observableName string, observerAddress grain.Address, opts ...observer.AddOption) error {
-	owner.Location = ""
-	observerAddress.Location = ""
-
+func (s *PSQLStore) Add(ctx context.Context, owner grain.Identity, observableName string, observerAddress grain.Identity, opts ...observer.AddOption) error {
 	options := observer.AddOptions{}
 	observer.ReadAddOptions(&options, opts)
 
@@ -163,15 +159,12 @@ func (s *PSQLStore) Add(ctx context.Context, owner grain.Address, observableName
 	return err
 }
 
-func (s *PSQLStore) Remove(ctx context.Context, owner grain.Address, opts ...observer.RemoveOption) error {
-	owner.Location = ""
-
+func (s *PSQLStore) Remove(ctx context.Context, owner grain.Identity, opts ...observer.RemoveOption) error {
 	options := observer.RemoveOptions{}
 	observer.ReadRemoveOptions(&options, opts)
 
 	var observerGrain *string
 	if options.ObserverGrain != nil {
-		options.ObserverGrain.Location = ""
 		og := options.ObserverGrain.String()
 		observerGrain = &og
 	}

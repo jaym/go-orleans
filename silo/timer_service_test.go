@@ -20,8 +20,7 @@ func TestTimerEntryHeap(t *testing.T) {
 
 	now := time.Now()
 
-	grainAdder := grain.Address{
-		Location:  "local",
+	grainAdder := grain.Identity{
 		GrainType: "type1",
 		ID:        "u1",
 	}
@@ -72,7 +71,7 @@ type triggerable struct {
 	received []triggerExpectation
 }
 
-func (trig *triggerable) TriggerGrainTimer(grainAddr grain.Address, name string) {
+func (trig *triggerable) TriggerGrainTimer(grainAddr grain.Identity, name string) {
 	trig.l.Lock()
 	defer trig.l.Unlock()
 	trig.received = append(trig.received, triggerExpectation{grainAddr: grainAddr, name: name})
@@ -80,7 +79,7 @@ func (trig *triggerable) TriggerGrainTimer(grainAddr grain.Address, name string)
 }
 
 type triggerExpectation struct {
-	grainAddr grain.Address
+	grainAddr grain.Identity
 	name      string
 }
 
@@ -108,13 +107,11 @@ func TestTimerService(t *testing.T) {
 	s.nowProvider = nowProvider
 	s.Start()
 
-	g1Addr := grain.Address{
-		Location:  "local",
+	g1Addr := grain.Identity{
 		GrainType: "type1",
 		ID:        "id1",
 	}
-	g2Addr := grain.Address{
-		Location:  "local",
+	g2Addr := grain.Identity{
 		GrainType: "type2",
 		ID:        "id2",
 	}

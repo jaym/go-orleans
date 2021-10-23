@@ -58,7 +58,7 @@ func TestPsqlStore(t *testing.T) {
 
 	ctx := context.Background()
 
-	addrs := []grain.Address{
+	addrs := []grain.Identity{
 		{
 			GrainType: "type1",
 			ID:        "id1",

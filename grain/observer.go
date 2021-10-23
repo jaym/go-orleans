@@ -1,7 +1,7 @@
 package grain
 
 type RegisteredObserver interface {
-	Addressable
+	GrainReference
 	ObservableName() string
 	Get(interface{}) error
 }

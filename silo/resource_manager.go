@@ -8,12 +8,12 @@ import (
 	"github.com/jaym/go-orleans/grain"
 )
 
-type EvictTrigger func(addresses []grain.Address)
+type EvictTrigger func(addresses []grain.Identity)
 
 var ErrNoCapacity = errors.New("No capacity")
 
 type resourceManagerEntry struct {
-	grainAddr   grain.Address
+	grainAddr   grain.Identity
 	lastTouched time.Time
 	element     *list.Element
 }
@@ -26,12 +26,12 @@ const (
 )
 
 type resourceManagerTouchMsg struct {
-	grainAddr grain.Address
+	grainAddr grain.Identity
 	resp      chan error
 }
 
 type resourceManagerRemoveMsg struct {
-	grainAddr grain.Address
+	grainAddr grain.Identity
 	resp      chan error
 }
 
@@ -42,7 +42,7 @@ type resourceManagerCtlMsg struct {
 }
 
 type retryEntry struct {
-	grainAddr grain.Address
+	grainAddr grain.Identity
 	expireAt  time.Time
 	resp      chan error
 }
@@ -55,11 +55,11 @@ type resourceManager struct {
 	used     int
 
 	recencyList *list.List
-	grains      map[grain.Address]*resourceManagerEntry
+	grains      map[grain.Identity]*resourceManagerEntry
 	retryList   []retryEntry
 
 	ctlChan   chan resourceManagerCtlMsg
-	evictChan chan []grain.Address
+	evictChan chan []grain.Identity
 }
 
 func newResourceManager(capacity int, evictTrigger EvictTrigger) *resourceManager {
@@ -68,9 +68,9 @@ func newResourceManager(capacity int, evictTrigger EvictTrigger) *resourceManage
 		evictTrigger: evictTrigger,
 		capacity:     capacity,
 		recencyList:  list.New(),
-		grains:       make(map[grain.Address]*resourceManagerEntry),
+		grains:       make(map[grain.Identity]*resourceManagerEntry),
 		ctlChan:      make(chan resourceManagerCtlMsg, 512),
-		evictChan:    make(chan []grain.Address),
+		evictChan:    make(chan []grain.Identity),
 		retryList:    make([]retryEntry, 0, 32),
 	}
 }
@@ -79,7 +79,7 @@ func (r *resourceManager) Start() {
 	r.start()
 }
 
-func (r *resourceManager) Touch(grainAddr grain.Address) error {
+func (r *resourceManager) Touch(grainAddr grain.Identity) error {
 	respChan := make(chan error, 1)
 	r.ctlChan <- resourceManagerCtlMsg{
 		msgType: resourceManagerTouchMsgType,
@@ -91,7 +91,7 @@ func (r *resourceManager) Touch(grainAddr grain.Address) error {
 	return <-respChan
 }
 
-func (r *resourceManager) Remove(grainAddr grain.Address) error {
+func (r *resourceManager) Remove(grainAddr grain.Identity) error {
 	respChan := make(chan error, 1)
 	r.ctlChan <- resourceManagerCtlMsg{
 		msgType: resourceManagerRemoveMsgType,
@@ -173,7 +173,7 @@ func (r *resourceManager) purgeRetryList() {
 	}
 }
 
-func (r *resourceManager) touch(grainAddr grain.Address) error {
+func (r *resourceManager) touch(grainAddr grain.Identity) error {
 	entry, ok := r.grains[grainAddr]
 	if !ok {
 		if r.used >= r.capacity {
@@ -205,7 +205,7 @@ func (r *resourceManager) evict() int {
 	}
 	numEvicted := 0
 	element := r.recencyList.Back()
-	addresesToEvict := make([]grain.Address, 0, desiredEviction)
+	addresesToEvict := make([]grain.Identity, 0, desiredEviction)
 	for element != nil && numEvicted < desiredEviction {
 		entry := element.Value.(*resourceManagerEntry)
 		addresesToEvict = append(addresesToEvict, entry.grainAddr)
@@ -220,7 +220,7 @@ func (r *resourceManager) evict() int {
 	}
 }
 
-func (r *resourceManager) remove(grainAddr grain.Address) {
+func (r *resourceManager) remove(grainAddr grain.Identity) {
 	entry, ok := r.grains[grainAddr]
 	if !ok {
 		return

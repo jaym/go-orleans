@@ -6,30 +6,26 @@ import (
 	"strings"
 )
 
-var ErrInvalidAddress = errors.New("invalid grain address")
+var ErrInvalidIdentity = errors.New("invalid grain identity")
 
-type Address struct {
-	Location  string
+type Identity struct {
 	GrainType string
 	ID        string
 }
 
-func (m Address) GetAddress() Address {
+func (m Identity) GetIdentity() Identity {
 	return m
 }
 
-func (a Address) String() string {
-	if a.Location == "" {
-		return fmt.Sprintf("%s/%s", a.GrainType, a.ID)
-	}
-	return fmt.Sprintf("%s/%s/%s", a.Location, a.GrainType, a.ID)
+func (a Identity) String() string {
+	return fmt.Sprintf("%s/%s", a.GrainType, a.ID)
 }
 
-type Addressable interface {
-	GetAddress() Address
+type GrainReference interface {
+	GetIdentity() Identity
 }
 
-func (a *Address) UnmarshalText(text []byte) error {
+func (a *Identity) UnmarshalText(text []byte) error {
 	s := string(text)
 	parts := strings.Split(s, "/")
 	if len(parts) == 1 {
@@ -37,12 +33,8 @@ func (a *Address) UnmarshalText(text []byte) error {
 	} else if len(parts) == 2 {
 		a.GrainType = parts[0]
 		a.ID = parts[1]
-	} else if len(parts) == 3 {
-		a.Location = parts[0]
-		a.GrainType = parts[1]
-		a.ID = parts[2]
 	} else {
-		return ErrInvalidAddress
+		return ErrInvalidIdentity
 	}
 	return nil
 }

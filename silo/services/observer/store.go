@@ -7,7 +7,7 @@ import (
 )
 
 type Store interface {
-	List(ctx context.Context, owner grain.Address, observableName string) ([]grain.RegisteredObserver, error)
-	Add(ctx context.Context, owner grain.Address, observableName string, address grain.Address, opts ...AddOption) error
-	Remove(ctx context.Context, owner grain.Address, opts ...RemoveOption) error
+	List(ctx context.Context, owner grain.Identity, observableName string) ([]grain.RegisteredObserver, error)
+	Add(ctx context.Context, owner grain.Identity, observableName string, address grain.Identity, opts ...AddOption) error
+	Remove(ctx context.Context, owner grain.Identity, opts ...RemoveOption) error
 }

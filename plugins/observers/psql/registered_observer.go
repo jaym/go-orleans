@@ -7,14 +7,14 @@ import (
 
 type registeredObserver struct {
 	codec codec.Codec
-	grain.Address
+	grain.Identity
 	observableName string
 	val            []byte
 }
 
-func newRegisteredObserver(codec codec.Codec, address grain.Address, observableName string, val []byte) *registeredObserver {
+func newRegisteredObserver(codec codec.Codec, address grain.Identity, observableName string, val []byte) *registeredObserver {
 	return &registeredObserver{
-		Address:        address,
+		Identity:       address,
 		observableName: observableName,
 		codec:          codec,
 		val:            val,
