@@ -11,6 +11,7 @@ const (
 	siloPackage          = protogen.GoImportPath("github.com/jaym/go-orleans/silo")
 	grainPackage         = protogen.GoImportPath("github.com/jaym/go-orleans/grain")
 	grainServicesPackage = protogen.GoImportPath("github.com/jaym/go-orleans/grain/services")
+	descriptorPackage    = protogen.GoImportPath("github.com/jaym/go-orleans/grain/descriptor")
 )
 
 var (
@@ -58,12 +59,32 @@ func writeGrainInterface(g *protogen.GeneratedFile, svc *protogen.Service) {
 	g.P("type ", svc.GoName, "Grain interface {")
 	g.P(grainRefType)
 	for _, m := range svc.Methods {
-		if !isObservable(m) {
+		if isObservable(m) {
+			g.P(grainInterfaceRegisterObserverSignature(g, m))
+		} else {
 			g.P(grainInterfaceMethodSignature(g, m))
 		}
 	}
 	g.P("}")
 	g.P()
+}
+
+func grainInterfaceRegisterObserverSignature(g *protogen.GeneratedFile, m *protogen.Method) string {
+	builder := strings.Builder{}
+	builder.WriteString("Register")
+	builder.WriteString(m.GoName)
+	builder.WriteString("Observer(")
+	builder.WriteString("ctx ")
+	builder.WriteString(g.QualifiedGoIdent(contextType))
+	builder.WriteString(", ")
+	builder.WriteString("observer ")
+	builder.WriteString(g.QualifiedGoIdent(identityType))
+	builder.WriteString(", ")
+	builder.WriteString("req *")
+	builder.WriteString(g.QualifiedGoIdent(m.Input.GoIdent))
+	builder.WriteString(") ")
+	builder.WriteString("error")
+	return builder.String()
 }
 
 func grainInterfaceMethodSignature(g *protogen.GeneratedFile, m *protogen.Method) string {
@@ -189,10 +210,11 @@ func writeGrainObserverActivator(g *protogen.GeneratedFile, m *protogen.Method) 
 func writeGrainRefInterface(g *protogen.GeneratedFile, svc *protogen.Service) {
 	g.P("type ", svc.GoName, "GrainRef interface {")
 	g.P(grainRefType)
-	g.P(svc.GoName, "Grain")
 	for _, m := range svc.Methods {
 		if isObservable(m) {
 			g.P(grainRefInterfaceObserverSignature(g, m))
+		} else {
+			g.P(grainInterfaceMethodSignature(g, m))
 		}
 	}
 	g.P("}")
@@ -247,6 +269,12 @@ func writeGrainServicesInterface(g *protogen.GeneratedFile, svc *protogen.Servic
 				"ctx ", g.QualifiedGoIdent(contextType), ") (",
 				"[]", g.QualifiedGoIdent(registeredObserverType), ", error)",
 			)
+			g.P("Add", m.GoName, "Observer(",
+				"ctx ", g.QualifiedGoIdent(contextType), ",",
+				"observer ", g.QualifiedGoIdent(identityType), ",",
+				"req *", g.QualifiedGoIdent(m.Input.GoIdent), ",",
+				") error",
+			)
 		}
 	}
 	g.P("}")
@@ -290,6 +318,21 @@ func writeGrainServicesImplementation(g *protogen.GeneratedFile, svc *protogen.S
 			)
 			g.P("}")
 			g.P()
+			g.P("func (m *", "impl_", svc.GoName, "GrainServices) Add", m.GoName, "Observer(",
+				"ctx ", g.QualifiedGoIdent(contextType), ",",
+				"observer ", g.QualifiedGoIdent(identityType), ",",
+				"req *", g.QualifiedGoIdent(m.Input.GoIdent), ",",
+				") error {",
+			)
+			g.P("_, err := m.observerManager.Add(",
+				"ctx,",
+				"ChirperGrain_GrainDesc.Observables[", observerIdx, "].Name,",
+				"observer, req)",
+			)
+			g.P("return err")
+			g.P("}")
+			g.P()
+
 			observerIdx++
 		}
 	}
@@ -310,7 +353,7 @@ func writeGrainActivatorInterface(g *protogen.GeneratedFile, svc *protogen.Servi
 
 func writeRegisterGrainActivator(g *protogen.GeneratedFile, svc *protogen.Service) {
 	g.P("func Register", svc.GoName, "GrainActivator(",
-		"registrar ", g.QualifiedGoIdent(siloPackage.Ident("Registrar")), ", ",
+		"registrar ", g.QualifiedGoIdent(descriptorPackage.Ident("Registrar")), ", ",
 		"activator ", svc.GoName, "GrainActivator) {",
 	)
 	g.P("registrar.Register(&", svc.GoName, "Grain_GrainDesc, activator)")
@@ -323,6 +366,7 @@ func generateGrainHandlers(g *protogen.GeneratedFile, svc *protogen.Service) {
 	for _, m := range svc.Methods {
 		if isObservable(m) {
 			writeObserverHandler(g, m)
+			writeRegisterObserverHandler(g, m)
 		} else {
 			writeMethodHandler(g, m)
 		}
@@ -367,6 +411,16 @@ func observerHandlerName(m *protogen.Method) string {
 	return builder.String()
 }
 
+func registeObserverHandlerName(m *protogen.Method) string {
+	builder := strings.Builder{}
+	builder.WriteRune('_')
+	builder.WriteString(m.Parent.GoName)
+	builder.WriteString("Grain_")
+	builder.WriteString(m.GoName)
+	builder.WriteString("_RegisterObserverHandler")
+	return builder.String()
+}
+
 func writeObserverHandler(g *protogen.GeneratedFile, m *protogen.Method) {
 	g.P("func ", observerHandlerName(m), "(",
 		"srv interface{},",
@@ -380,6 +434,24 @@ func writeObserverHandler(g *protogen.GeneratedFile, m *protogen.Method) {
 	g.P("}")
 	g.P()
 	g.P("return srv.(", observerRefName(m), ")", ".OnNotify", m.GoName, "(ctx, in)")
+
+	g.P("}")
+}
+
+func writeRegisterObserverHandler(g *protogen.GeneratedFile, m *protogen.Method) {
+	g.P("func ", registeObserverHandlerName(m), "(",
+		"srv interface{},",
+		"ctx ", g.QualifiedGoIdent(contextType), ", ",
+		"observer ", g.QualifiedGoIdent(identityType), ", ",
+		"dec func(interface{}) error) error {",
+	)
+	g.P("in := new(", g.QualifiedGoIdent(m.Input.GoIdent), ")")
+
+	g.P("if err := dec(in); err != nil {")
+	g.P("return err")
+	g.P("}")
+	g.P()
+	g.P("return srv.(", m.Parent.GoName, "Grain).Register", m.GoName, "Observer(ctx, observer, in)")
 
 	g.P("}")
 }
@@ -413,14 +485,14 @@ func writeMethodHandler(g *protogen.GeneratedFile, m *protogen.Method) {
 }
 
 func generateGrainDescriptor(g *protogen.GeneratedFile, svc *protogen.Service) {
-	g.P("var ", svc.GoName, "Grain_GrainDesc = ", g.QualifiedGoIdent(siloPackage.Ident("GrainDescription")), "{")
+	g.P("var ", svc.GoName, "Grain_GrainDesc = ", g.QualifiedGoIdent(descriptorPackage.Ident("GrainDescription")), "{")
 	g.P("GrainType: ", "\"", svc.GoName, "Grain", "\",")
 
-	g.P("Activation: ", g.QualifiedGoIdent(siloPackage.Ident("ActivationDesc")), "{")
+	g.P("Activation: ", g.QualifiedGoIdent(descriptorPackage.Ident("ActivationDesc")), "{")
 	g.P("Handler: ", activatorHandlerName(svc), ",")
 	g.P("},")
 
-	g.P("Methods: []", g.QualifiedGoIdent(siloPackage.Ident("MethodDesc")), "{")
+	g.P("Methods: []", g.QualifiedGoIdent(descriptorPackage.Ident("MethodDesc")), "{")
 	for _, m := range svc.Methods {
 		if !isObservable(m) {
 			writeMethodDesc(g, m)
@@ -428,7 +500,7 @@ func generateGrainDescriptor(g *protogen.GeneratedFile, svc *protogen.Service) {
 	}
 	g.P("},")
 
-	g.P("Observables: []", g.QualifiedGoIdent(siloPackage.Ident("ObservableDesc")), "{")
+	g.P("Observables: []", g.QualifiedGoIdent(descriptorPackage.Ident("ObservableDesc")), "{")
 	for _, m := range svc.Methods {
 		if isObservable(m) {
 			writeObservableDesc(g, m)
@@ -451,6 +523,7 @@ func writeObservableDesc(g *protogen.GeneratedFile, m *protogen.Method) {
 	g.P("{")
 	g.P("Name: \"", m.GoName, "\",")
 	g.P("Handler: ", observerHandlerName(m), ",")
+	g.P("RegisterHandler: ", registeObserverHandlerName(m), ",")
 	g.P("},")
 }
 

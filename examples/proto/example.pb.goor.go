@@ -4,6 +4,7 @@ package examples
 import (
 	context "context"
 	grain "github.com/jaym/go-orleans/grain"
+	descriptor "github.com/jaym/go-orleans/grain/descriptor"
 	services "github.com/jaym/go-orleans/grain/services"
 	silo "github.com/jaym/go-orleans/silo"
 )
@@ -12,6 +13,7 @@ type ChirperGrainServices interface {
 	CoreGrainServices() services.CoreGrainServices
 	NotifyMessageObservers(ctx context.Context, observers []grain.RegisteredObserver, val *ChirpMessage) error
 	ListMessageObservers(ctx context.Context) ([]grain.RegisteredObserver, error)
+	AddMessageObserver(ctx context.Context, observer grain.Identity, req *SubscribeRequest) error
 }
 
 type impl_ChirperGrainServices struct {
@@ -31,17 +33,23 @@ func (m *impl_ChirperGrainServices) ListMessageObservers(ctx context.Context) ([
 	return m.observerManager.List(ctx, ChirperGrain_GrainDesc.Observables[0].Name)
 }
 
+func (m *impl_ChirperGrainServices) AddMessageObserver(ctx context.Context, observer grain.Identity, req *SubscribeRequest) error {
+	_, err := m.observerManager.Add(ctx, ChirperGrain_GrainDesc.Observables[0].Name, observer, req)
+	return err
+}
+
 type ChirperGrainActivator interface {
 	Activate(ctx context.Context, identity grain.Identity, services ChirperGrainServices) (ChirperGrain, error)
 }
 
-func RegisterChirperGrainActivator(registrar silo.Registrar, activator ChirperGrainActivator) {
+func RegisterChirperGrainActivator(registrar descriptor.Registrar, activator ChirperGrainActivator) {
 	registrar.Register(&ChirperGrain_GrainDesc, activator)
 }
 
 type ChirperGrain interface {
 	grain.GrainReference
 	PublishMessage(ctx context.Context, req *PublishMessageRequest) (*PublishMessageResponse, error)
+	RegisterMessageObserver(ctx context.Context, observer grain.Identity, req *SubscribeRequest) error
 }
 
 type ChirperGrainMessageObserver interface {
@@ -81,25 +89,26 @@ func (a *_Chirper_Message_ObserverActivator) Activate(ctx context.Context, ident
 
 type ChirperGrainRef interface {
 	grain.GrainReference
-	ChirperGrain
+	PublishMessage(ctx context.Context, req *PublishMessageRequest) (*PublishMessageResponse, error)
 	ObserveMessage(ctx context.Context, observer grain.GrainReference, req *SubscribeRequest) error
 }
 
-var ChirperGrain_GrainDesc = silo.GrainDescription{
+var ChirperGrain_GrainDesc = descriptor.GrainDescription{
 	GrainType: "ChirperGrain",
-	Activation: silo.ActivationDesc{
+	Activation: descriptor.ActivationDesc{
 		Handler: _ChirperGrain_Activate,
 	},
-	Methods: []silo.MethodDesc{
+	Methods: []descriptor.MethodDesc{
 		{
 			Name:    "PublishMessage",
 			Handler: _ChirperGrain_PublishMessage_MethodHandler,
 		},
 	},
-	Observables: []silo.ObservableDesc{
+	Observables: []descriptor.ObservableDesc{
 		{
-			Name:    "Message",
-			Handler: _ChirperGrain_Message_ObserverHandler,
+			Name:            "Message",
+			Handler:         _ChirperGrain_Message_ObserverHandler,
+			RegisterHandler: _ChirperGrain_Message_RegisterObserverHandler,
 		},
 	},
 }
@@ -128,6 +137,14 @@ func _ChirperGrain_Message_ObserverHandler(srv interface{}, ctx context.Context,
 	}
 
 	return srv.(ChirperGrainMessageObserver).OnNotifyMessage(ctx, in)
+}
+func _ChirperGrain_Message_RegisterObserverHandler(srv interface{}, ctx context.Context, observer grain.Identity, dec func(interface{}) error) error {
+	in := new(SubscribeRequest)
+	if err := dec(in); err != nil {
+		return err
+	}
+
+	return srv.(ChirperGrain).RegisterMessageObserver(ctx, observer, in)
 }
 
 type _grainClient_ChirperGrain struct {

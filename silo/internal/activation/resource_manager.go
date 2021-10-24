@@ -1,4 +1,4 @@
-package silo
+package activation
 
 import (
 	"container/list"
@@ -47,7 +47,7 @@ type retryEntry struct {
 	resp      chan error
 }
 
-type resourceManager struct {
+type ResourceManager struct {
 	nowProvider  func() time.Time
 	evictTrigger EvictTrigger
 
@@ -62,8 +62,8 @@ type resourceManager struct {
 	evictChan chan []grain.Identity
 }
 
-func newResourceManager(capacity int, evictTrigger EvictTrigger) *resourceManager {
-	return &resourceManager{
+func NewResourceManager(capacity int, evictTrigger EvictTrigger) *ResourceManager {
+	return &ResourceManager{
 		nowProvider:  time.Now,
 		evictTrigger: evictTrigger,
 		capacity:     capacity,
@@ -75,11 +75,11 @@ func newResourceManager(capacity int, evictTrigger EvictTrigger) *resourceManage
 	}
 }
 
-func (r *resourceManager) Start() {
+func (r *ResourceManager) Start() {
 	r.start()
 }
 
-func (r *resourceManager) Touch(grainAddr grain.Identity) error {
+func (r *ResourceManager) Touch(grainAddr grain.Identity) error {
 	respChan := make(chan error, 1)
 	r.ctlChan <- resourceManagerCtlMsg{
 		msgType: resourceManagerTouchMsgType,
@@ -91,7 +91,7 @@ func (r *resourceManager) Touch(grainAddr grain.Identity) error {
 	return <-respChan
 }
 
-func (r *resourceManager) Remove(grainAddr grain.Identity) error {
+func (r *ResourceManager) Remove(grainAddr grain.Identity) error {
 	respChan := make(chan error, 1)
 	r.ctlChan <- resourceManagerCtlMsg{
 		msgType: resourceManagerRemoveMsgType,
@@ -103,7 +103,7 @@ func (r *resourceManager) Remove(grainAddr grain.Identity) error {
 	return <-respChan
 }
 
-func (r *resourceManager) start() {
+func (r *ResourceManager) start() {
 	go func() {
 		for identesesToEvict := range r.evictChan {
 			r.evictTrigger(identesesToEvict)
@@ -139,7 +139,7 @@ func (r *resourceManager) start() {
 	}()
 }
 
-func (r *resourceManager) addRetryEntry(msg *resourceManagerTouchMsg) bool {
+func (r *ResourceManager) addRetryEntry(msg *resourceManagerTouchMsg) bool {
 	r.purgeRetryList()
 	if len(r.retryList)+1 > 32 {
 		return false
@@ -152,7 +152,7 @@ func (r *resourceManager) addRetryEntry(msg *resourceManagerTouchMsg) bool {
 	return true
 }
 
-func (r *resourceManager) purgeRetryList() {
+func (r *ResourceManager) purgeRetryList() {
 	i := 0
 	now := r.nowProvider()
 	for i < len(r.retryList) {
@@ -173,7 +173,7 @@ func (r *resourceManager) purgeRetryList() {
 	}
 }
 
-func (r *resourceManager) touch(grainAddr grain.Identity) error {
+func (r *ResourceManager) touch(grainAddr grain.Identity) error {
 	entry, ok := r.grains[grainAddr]
 	if !ok {
 		if r.used >= r.capacity {
@@ -198,7 +198,7 @@ func (r *resourceManager) touch(grainAddr grain.Identity) error {
 	return nil
 }
 
-func (r *resourceManager) evict() int {
+func (r *ResourceManager) evict() int {
 	desiredEviction := r.used - int(0.2*float32(r.capacity))
 	if desiredEviction <= 0 {
 		return 0
@@ -220,7 +220,7 @@ func (r *resourceManager) evict() int {
 	}
 }
 
-func (r *resourceManager) remove(grainAddr grain.Identity) {
+func (r *ResourceManager) remove(grainAddr grain.Identity) {
 	entry, ok := r.grains[grainAddr]
 	if !ok {
 		return

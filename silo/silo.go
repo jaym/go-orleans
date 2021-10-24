@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+
+	gcontext "github.com/jaym/go-orleans/context"
 	"github.com/jaym/go-orleans/grain"
-	grainservices "github.com/jaym/go-orleans/grain/services"
+	"github.com/jaym/go-orleans/grain/descriptor"
 	"github.com/jaym/go-orleans/plugins/codec"
 	"github.com/jaym/go-orleans/plugins/codec/protobuf"
 	"github.com/jaym/go-orleans/silo/services/observer"
@@ -16,38 +18,6 @@ import (
 	"github.com/segmentio/ksuid"
 	"google.golang.org/protobuf/proto"
 )
-
-type GrainDescription struct {
-	GrainType   string
-	Activation  ActivationDesc
-	Methods     []MethodDesc
-	Observables []ObservableDesc
-}
-
-type ActivationDesc struct {
-	Handler ActivationHandler
-}
-
-type MethodDesc struct {
-	Name    string
-	Handler MethodHandler
-}
-
-type ObservableDesc struct {
-	Name          string
-	Handler       ObservableHandler
-	NotifyHandler NotifyObserverHandler
-}
-
-type ActivationHandler func(activator interface{}, ctx context.Context, coreServices grainservices.CoreGrainServices, o grainservices.GrainObserverManager, identity grain.Identity) (grain.GrainReference, error)
-type MethodHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) (interface{}, error)
-type ObservableHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) error
-type NotifyObserverHandler func(m grainservices.GrainObserverManager, ctx context.Context, o []grain.RegisteredObserver) error
-
-type Registrar interface {
-	Register(desc *GrainDescription, impl interface{})
-	Lookup(grainType string) (*GrainDescription, interface{}, error)
-}
 
 type Silo struct {
 	localGrainManager GrainActivationManager
@@ -57,7 +27,7 @@ type Silo struct {
 	log               logr.Logger
 }
 
-func NewSilo(log logr.Logger, observerStore observer.Store, registrar Registrar) *Silo {
+func NewSilo(log logr.Logger, observerStore observer.Store, registrar descriptor.Registrar) *Silo {
 	s := &Silo{
 		log:           log.WithName("silo"),
 		observerStore: observerStore,
@@ -67,11 +37,9 @@ func NewSilo(log logr.Logger, observerStore observer.Store, registrar Registrar)
 	// activation. Setting it to nil is will cause a panic with
 	// no information on what went wrong
 	registrar.Register(&grain_GrainDesc, nil)
-	s.localGrainManager = NewGrainActivationManager(registrar, s)
 	s.client = &siloClientImpl{
 		futures:                 make(map[string]grain.InvokeMethodFuture),
 		registerObserverFutures: make(map[string]grain.RegisterObserverFuture),
-		grainManager:            s.localGrainManager,
 		log:                     s.log.WithName("siloClient"),
 		codec:                   protobuf.NewCodec(),
 	}
@@ -84,6 +52,8 @@ func NewSilo(log logr.Logger, observerStore observer.Store, registrar Registrar)
 			s.log.V(1).Error(err, "failed to trigger timer notification", "identity", grainAddr, "triggerName", name)
 		}
 	})
+	s.localGrainManager = NewGrainActivationManager(registrar, s.client, s.timerService, s.observerStore)
+	s.client.grainManager = s.localGrainManager
 	s.timerService.Start()
 	return s
 }
@@ -92,7 +62,7 @@ func (s *Silo) Client() grain.SiloClient {
 	return s.client
 }
 
-func (s *Silo) Register(desc *GrainDescription, activator interface{}) {
+func (s *Silo) Register(desc *descriptor.GrainDescription, activator interface{}) {
 }
 
 func (s *Silo) CreateGrain(activator GenericGrainActivator) (grain.Identity, error) {
@@ -145,7 +115,7 @@ func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver grain.Identi
 	log.V(4).Info("InvokeMethod")
 
 	f := newInvokeMethodFuture(s.codec, id, 60*time.Second)
-	sender := IdentityFromContext(ctx)
+	sender := gcontext.IdentityFromContext(ctx)
 	if sender == nil {
 		log.Info("no sender in context")
 		// TODO: generate anonymous identity
@@ -203,12 +173,24 @@ func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer grain.Id
 	s.registerObserverFutures[id] = f
 	s.mutex.Unlock()
 
-	err := s.grainManager.EnqueueRegisterObserverRequest(RegisterObserverRequest{
+	data, err := proto.Marshal(in)
+	if err != nil {
+		log.Error(err, "failed to marshal")
+
+		s.mutex.Lock()
+		delete(s.registerObserverFutures, id)
+		s.mutex.Unlock()
+		if rErr := f.ResolveError(err); rErr != nil {
+			log.Error(err, "failed to resolve future")
+		}
+	}
+
+	err = s.grainManager.EnqueueRegisterObserverRequest(RegisterObserverRequest{
 		Observer:   observer,
 		Observable: observable,
 		Name:       name,
 		UUID:       id,
-		In:         in,
+		In:         data,
 	})
 	if err != nil {
 		log.Error(err, "failed to enqueue register observer request")
@@ -259,7 +241,7 @@ func (s *siloClientImpl) NotifyObservers(ctx context.Context, observableType str
 		return nil
 	}
 
-	sender := IdentityFromContext(ctx)
+	sender := gcontext.IdentityFromContext(ctx)
 	if sender == nil {
 		log.Info("no sender in context")
 		panic("no sender")

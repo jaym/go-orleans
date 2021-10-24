@@ -1,4 +1,4 @@
-package silo
+package activation
 
 import (
 	"context"
@@ -77,7 +77,7 @@ func (m *grainObserverManager) List(ctx context.Context, observableName string) 
 	return m.registeredObservers[observableName], nil
 }
 
-func (m *grainObserverManager) Add(ctx context.Context, observableName string, identity grain.Identity, val interface{}) (grain.RegisteredObserver, error) {
+func (m *grainObserverManager) Add(ctx context.Context, observableName string, identity grain.Identity, val proto.Message) (grain.RegisteredObserver, error) {
 	if err := m.ensureLoaded(ctx); err != nil {
 		return nil, err
 	}

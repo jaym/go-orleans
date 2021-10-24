@@ -14,12 +14,15 @@ import (
 	"github.com/go-logr/stdr"
 	"github.com/jackc/pgx/v4/pgxpool"
 	_ "github.com/jackc/pgx/v4/stdlib"
+	"github.com/stretchr/testify/require"
+
+	gcontext "github.com/jaym/go-orleans/context"
 	examples "github.com/jaym/go-orleans/examples/proto"
 	"github.com/jaym/go-orleans/grain"
+	"github.com/jaym/go-orleans/grain/descriptor"
 	"github.com/jaym/go-orleans/plugins/codec/protobuf"
 	"github.com/jaym/go-orleans/plugins/observers/psql"
 	"github.com/jaym/go-orleans/silo"
-	"github.com/stretchr/testify/require"
 )
 
 type ChirperGrainActivatorTestImpl struct {
@@ -67,6 +70,11 @@ func (g *ChirperGrainImpl) PublishMessage(ctx context.Context, req *examples.Pub
 		Foobar: "hello " + req.Msg,
 	}, nil
 }
+
+func (g *ChirperGrainImpl) RegisterMessageObserver(ctx context.Context, observer grain.Identity, req *examples.SubscribeRequest) error {
+	return g.services.AddMessageObserver(ctx, observer, req)
+}
+
 func (g *ChirperGrainImpl) OnNotifyMessage(ctx context.Context, req *examples.ChirpMessage) error {
 	fmt.Printf("%v got notification %q\n", g.Identity, req.Msg)
 	return nil
@@ -77,21 +85,21 @@ func (g *ChirperGrainImpl) Deactivate(ctx context.Context) {
 }
 
 type registrarEntry struct {
-	Description *silo.GrainDescription
+	Description *descriptor.GrainDescription
 	Impl        interface{}
 }
 type TestRegistrar struct {
 	entries map[string]registrarEntry
 }
 
-func (r *TestRegistrar) Register(desc *silo.GrainDescription, impl interface{}) {
+func (r *TestRegistrar) Register(desc *descriptor.GrainDescription, impl interface{}) {
 	r.entries[desc.GrainType] = registrarEntry{
 		Description: desc,
 		Impl:        impl,
 	}
 }
 
-func (r *TestRegistrar) Lookup(grainType string) (*silo.GrainDescription, interface{}, error) {
+func (r *TestRegistrar) Lookup(grainType string) (*descriptor.GrainDescription, interface{}, error) {
 	e, ok := r.entries[grainType]
 	if !ok {
 		return nil, nil, errors.New("no impl")
@@ -149,7 +157,7 @@ func TestItAll(t *testing.T) {
 		}
 		ref := examples.GetChirperGrain(s.Client(), a)
 		fmt.Printf("Calling g%d\n", i)
-		_, err := ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
+		_, err := ref.PublishMessage(gcontext.WithIdentityContext(context.Background(), grain.Identity{}), in)
 		if err != nil {
 			fmt.Printf("%v\n", err)
 		}
@@ -176,20 +184,20 @@ func TestItAll(t *testing.T) {
 	err = chirperGrain1Ref.ObserveMessage(context.Background(), identity, &examples.SubscribeRequest{})
 	require.NoError(t, err)
 
-	resp, err := chirperGrain2Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
+	resp, err := chirperGrain2Ref.PublishMessage(gcontext.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
 
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
+	resp, err = chirperGrain1Ref.PublishMessage(gcontext.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
 	require.Equal(t, "hello world", resp.Foobar)
 
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
+	resp, err = chirperGrain1Ref.PublishMessage(gcontext.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
+	resp, err = chirperGrain1Ref.PublishMessage(gcontext.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
+	resp, err = chirperGrain1Ref.PublishMessage(gcontext.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
-	resp, err = chirperGrain1Ref.PublishMessage(silo.WithIdentityContext(context.Background(), grain.Identity{}), in)
+	resp, err = chirperGrain1Ref.PublishMessage(gcontext.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
 
 	time.Sleep(3 * time.Second)
