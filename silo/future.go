@@ -2,82 +2,40 @@ package silo
 
 import (
 	"context"
-	"time"
+	"errors"
 
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/plugins/codec"
-	"google.golang.org/protobuf/proto"
+	"github.com/jaym/go-orleans/silo/internal/transport"
 )
 
 type InvokeMethodResp struct {
-	data []byte
-	err  error
+	codec codec.Codec
+	data  []byte
 }
 
 func (resp InvokeMethodResp) Get(out interface{}) error {
-	if resp.err != nil {
-		return resp.err
-	}
-	return proto.Unmarshal(resp.data, out.(proto.Message))
+	return resp.codec.Decode(resp.data, out)
 }
 
 type invokeMethodFuture struct {
-	id       string
-	respChan chan InvokeMethodResp
-	timeout  time.Duration
-	codec    codec.Codec
+	codec codec.Codec
+	f     transport.InvokeMethodFuture
 }
 
-func newInvokeMethodFuture(codec codec.Codec, id string, timeout time.Duration) *invokeMethodFuture {
-	if timeout == 0 {
-		panic("timeout must be specified")
-	}
+func newInvokeMethodFuture(codec codec.Codec, f transport.InvokeMethodFuture) *invokeMethodFuture {
 	return &invokeMethodFuture{
-		id:       id,
-		respChan: make(chan InvokeMethodResp, 1),
-		timeout:  timeout,
-		codec:    codec,
-	}
-}
-
-func (f *invokeMethodFuture) ResolveValue(out interface{}) error {
-	data, err := f.codec.Encode(out)
-	if err != nil {
-		return err
-	}
-	resp := InvokeMethodResp{
-		data: data,
-	}
-
-	f.resolve(resp)
-	return nil
-}
-
-func (f *invokeMethodFuture) ResolveError(err error) error {
-	resp := InvokeMethodResp{
-		err: err,
-	}
-
-	f.resolve(resp)
-	return nil
-}
-
-func (f *invokeMethodFuture) resolve(resp InvokeMethodResp) {
-	select {
-	case f.respChan <- resp:
-	default:
-		// TODO: error handling
-		panic("multiple resolve")
+		codec: codec,
+		f:     f,
 	}
 }
 
 func (f *invokeMethodFuture) Await(ctx context.Context) (grain.InvokeMethodResp, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case r := <-f.respChan:
-		return r, nil
+	data, err := f.f.Await(ctx)
+	if err != nil {
+		return nil, err
 	}
+	return &InvokeMethodResp{codec: f.codec, data: data}, nil
 }
 
 type RegisterObserverResp struct {
@@ -85,46 +43,25 @@ type RegisterObserverResp struct {
 }
 
 type registerObserverFuture struct {
-	id       string
-	respChan chan RegisterObserverResp
-	timeout  time.Duration
+	codec codec.Codec
+	f     transport.RegisterObserverFuture
 }
 
-func newRegisterObserverFuture(id string, timeout time.Duration) *registerObserverFuture {
-	if timeout == 0 {
-		panic("timeout must be specified")
-	}
+func newRegisterObserverFuture(codec codec.Codec, f transport.RegisterObserverFuture) *registerObserverFuture {
 	return &registerObserverFuture{
-		id:       id,
-		respChan: make(chan RegisterObserverResp, 1),
-		timeout:  timeout,
-	}
-}
-
-func (f *registerObserverFuture) Resolve() error {
-	f.resolve(RegisterObserverResp{})
-	return nil
-}
-
-func (f *registerObserverFuture) ResolveError(err error) error {
-	f.resolve(RegisterObserverResp{Err: err})
-	return nil
-}
-
-func (f *registerObserverFuture) resolve(resp RegisterObserverResp) {
-	select {
-	case f.respChan <- resp:
-	default:
-		// TODO: error handling
-		panic("multiple resolve")
+		codec: codec,
+		f:     f,
 	}
 }
 
 func (f *registerObserverFuture) Await(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case r := <-f.respChan:
-		return r.Err
+	errData, err := f.f.Await(ctx)
+	if err != nil {
+		return err
 	}
+	if len(errData) > 0 {
+		// TODO: decode this properly
+		return errors.New(string(errData))
+	}
+	return nil
 }

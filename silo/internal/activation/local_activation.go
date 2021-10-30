@@ -23,17 +23,17 @@ const (
 )
 
 type grainActivationInvokeMethod struct {
-	Sender  grain.Identity
-	Method  string
-	UUID    string
-	Payload []byte
+	Sender      grain.Identity
+	Method      string
+	Payload     []byte
+	ResolveFunc func(out interface{}, err error)
 }
 
 type grainActivationRegisterObserver struct {
-	Observer grain.Identity
-	Name     string
-	UUID     string
-	Payload  []byte
+	Observer    grain.Identity
+	Name        string
+	Payload     []byte
+	ResolveFunc func(err error)
 }
 
 type grainActivationTriggerTimer struct {
@@ -218,33 +218,26 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 		req := msg.invokeMethod
 		m, err := l.findMethodDesc(req.Method)
 		if err != nil {
-			// encode error
-			panic(err)
+			req.ResolveFunc(nil, err)
+			return
 		}
 		resp, err := m.Handler(activation, ctx, func(in interface{}) error {
 			return proto.Unmarshal(req.Payload, in.(proto.Message))
 		})
-		if err != nil {
-			// encode error
-			panic(err)
-		}
-		err = l.grainActivator.siloClient.SendResponse(ctx, req.Sender, req.UUID, resp.(proto.Message))
-		if err != nil {
-			// encode error
-			panic(err)
-		}
+		req.ResolveFunc(resp, err)
 	case registerObserver:
 		l.grainActivator.resourceManager.Touch(l.identity)
 
 		req := msg.registerObserver
 		o, err := l.findObserableDesc("", req.Name)
 		if err != nil {
-			panic(err)
+			req.ResolveFunc(err)
+			return
 		}
-		o.RegisterHandler(activation, ctx, req.Observer, func(in interface{}) error {
+		err = o.RegisterHandler(activation, ctx, req.Observer, func(in interface{}) error {
 			return proto.Unmarshal(req.Payload, in.(proto.Message))
 		})
-		l.grainActivator.siloClient.AckRegisterObserver(ctx, req.Observer, req.UUID, err)
+		req.ResolveFunc(err)
 	case notifyObserver:
 		l.grainActivator.resourceManager.Touch(l.identity)
 
@@ -265,28 +258,26 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 	}
 }
 
-func (l *LocalGrainActivation) InvokeMethod(sender grain.Identity, method string,
-	uuid string, payload []byte) error {
-
+func (l *LocalGrainActivation) InvokeMethod(sender grain.Identity, method string, payload []byte, resolve func(out interface{}, err error)) error {
 	return l.pushInbox(grainActivationMessage{
 		messageType: invokeMethod,
 		invokeMethod: &grainActivationInvokeMethod{
-			Sender:  sender,
-			Method:  method,
-			UUID:    uuid,
-			Payload: payload,
+			Sender:      sender,
+			Method:      method,
+			Payload:     payload,
+			ResolveFunc: resolve,
 		},
 	})
 }
 
-func (l *LocalGrainActivation) RegisterObserver(observer grain.Identity, observableType string, uuid string, payload []byte) error {
+func (l *LocalGrainActivation) RegisterObserver(observer grain.Identity, observableType string, payload []byte, resolve func(err error)) error {
 	return l.pushInbox(grainActivationMessage{
 		messageType: registerObserver,
 		registerObserver: &grainActivationRegisterObserver{
-			Observer: observer,
-			Name:     observableType,
-			UUID:     uuid,
-			Payload:  payload,
+			Observer:    observer,
+			Name:        observableType,
+			ResolveFunc: resolve,
+			Payload:     payload,
 		},
 	})
 }

@@ -1,6 +1,7 @@
 package silo
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -8,18 +9,10 @@ import (
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"
 	"github.com/jaym/go-orleans/silo/internal/activation"
+	"github.com/jaym/go-orleans/silo/services/cluster"
 	"github.com/jaym/go-orleans/silo/services/observer"
 	"github.com/jaym/go-orleans/silo/services/timer"
 )
-
-type GrainActivationManager interface {
-	ActivateGrain(ActivateGrainRequest) error
-	EnqueueInvokeMethodRequest(InvokeMethodRequest) error
-	EnqueueRegisterObserverRequest(RegisterObserverRequest) error
-	EnqueueObserverNotification(ObserverNotification) error
-	EnqueueTimerTrigger(TimerTriggerNotification) error
-	EnqueueEvictGrain(EvictGrainRequest) error
-}
 
 type ActivateGrainRequest struct {
 	Identity  grain.Identity
@@ -31,19 +24,20 @@ type EvictGrainRequest struct {
 }
 
 type InvokeMethodRequest struct {
-	Sender   grain.Identity
-	Receiver grain.Identity
-	Method   string
-	UUID     string
-	in       []byte
+	Sender      grain.Identity
+	Receiver    grain.Identity
+	Method      string
+	in          []byte
+	ResolveFunc func(interface{}, error)
 }
 
 type RegisterObserverRequest struct {
-	Observer   grain.Identity
-	Observable grain.Identity
-	Name       string
-	UUID       string
-	In         []byte
+	Observer    grain.Identity
+	Observable  grain.Identity
+	Name        string
+	UUID        string
+	In          []byte
+	ResolveFunc func(error)
 }
 
 type ObserverNotification struct {
@@ -64,15 +58,19 @@ type GrainActivationManagerImpl struct {
 	lock                sync.Mutex
 	grainActivations    map[grain.Identity]*activation.LocalGrainActivation
 	localGrainActivator *activation.LocalGrainActivator
+	grainDirectory      cluster.GrainDirectory
+	//nodeName            cluster.Location
 }
 
 func NewGrainActivationManager(registrar descriptor.Registrar,
 	siloClient grain.SiloClient,
 	timerService timer.TimerService,
 	observerStore observer.Store,
+	grainDirectory cluster.GrainDirectory,
 ) *GrainActivationManagerImpl {
 	m := &GrainActivationManagerImpl{
 		grainActivations: make(map[grain.Identity]*activation.LocalGrainActivation),
+		grainDirectory:   grainDirectory,
 	}
 	resourceManager := activation.NewResourceManager(8, func(identityes []grain.Identity) {
 		for _, a := range identityes {
@@ -105,7 +103,7 @@ func (m *GrainActivationManagerImpl) EnqueueInvokeMethodRequest(req InvokeMethod
 		return err
 	}
 
-	return activation.InvokeMethod(req.Sender, req.Method, req.UUID, req.in)
+	return activation.InvokeMethod(req.Sender, req.Method, req.in, req.ResolveFunc)
 }
 
 func (m *GrainActivationManagerImpl) EnqueueRegisterObserverRequest(req RegisterObserverRequest) error {
@@ -114,7 +112,7 @@ func (m *GrainActivationManagerImpl) EnqueueRegisterObserverRequest(req Register
 		return err
 	}
 
-	return activation.RegisterObserver(req.Observer, req.Name, req.UUID, req.In)
+	return activation.RegisterObserver(req.Observer, req.Name, req.In, req.ResolveFunc)
 }
 
 func (m *GrainActivationManagerImpl) EnqueueObserverNotification(req ObserverNotification) error {
@@ -185,6 +183,10 @@ func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allo
 	if !ok {
 		if allowActivation {
 			var err error
+			// TODO: doing an RPC while holding the lock sucks. Maybe there's a better way to do this
+			if err = m.grainDirectory.Activate(context.TODO(), cluster.GrainAddress{Identity: receiver}); err != nil {
+				return nil, err
+			}
 			a, err = m.localGrainActivator.ActivateGrainWithDefaultActivator(receiver)
 			if err != nil {
 				return nil, err
@@ -196,6 +198,30 @@ func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allo
 	}
 	return a, nil
 }
+
+/*
+func (m *GrainActivationManagerImpl) getGrainAddress(ctx context.Context, ident grain.Identity) (cluster.GrainAddress, error) {
+	grainAddress, err := m.grainDirectory.Lookup(ctx, ident)
+	if err != nil {
+		if err == cluster.ErrGrainActivationNotFound {
+			return m.placeGrain(ctx, ident)
+		}
+		return cluster.GrainAddress{}, err
+	}
+	return grainAddress, nil
+}
+
+func (m *GrainActivationManagerImpl) placeGrain(ctx context.Context, ident grain.Identity) (cluster.GrainAddress, error) {
+	return cluster.GrainAddress{
+		Location: cluster.Location(m.nodeName),
+		Identity: ident,
+	}, nil
+}
+
+func (m *GrainActivationManagerImpl) isLocal(addr cluster.GrainAddress) bool {
+	return m.nodeName == addr.Location
+}
+*/
 
 var ErrInboxFull = errors.New("inbox full")
 var ErrGrainActivationNotFound = errors.New("grain activation not found")
