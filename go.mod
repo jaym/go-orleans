@@ -8,6 +8,7 @@ require (
 	github.com/go-logr/stdr v1.1.0
 	github.com/golang-migrate/migrate/v4 v4.15.1-0.20211015165204-1ba9becc5c8d
 	github.com/jackc/pgconn v1.10.0
+	github.com/jackc/pgerrcode v0.0.0-20201024163028-a0d42d470451
 	github.com/jackc/pgx/v4 v4.13.0
 	github.com/segmentio/ksuid v1.0.4
 	github.com/stretchr/testify v1.7.0
