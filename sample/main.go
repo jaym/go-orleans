@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	stdlog "log"
-	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -134,18 +133,7 @@ func main() {
 	log := stdr.NewWithOptions(stdlog.New(os.Stderr, "", stdlog.LstdFlags), stdr.Options{LogCaller: stdr.All})
 
 	observerStore := psql.NewObserverStore(log.WithName("observerstore"), pool, psql.WithCodec(protobuf.NewCodec()))
-	d := static.New([]cluster.Node{
-		{
-			Name: "node1",
-			Addr: net.IPv4(127, 0, 0, 1),
-			Port: 9991,
-		},
-		{
-			Name: "node2",
-			Addr: net.IPv4(127, 0, 0, 1),
-			Port: 9992,
-		},
-	})
+	d := static.New([]string{"127.0.0.1:9991", "127.0.0.1:9992"})
 
 	mp := memberlist.New(log, cluster.Location(os.Args[1]), port)
 	s := silo.NewSilo(log, observerStore, silo.WithNodeName(os.Args[1]), silo.WithDiscovery(d), silo.WithMembershipProtocol(mp))

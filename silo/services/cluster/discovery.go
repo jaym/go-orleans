@@ -3,14 +3,14 @@ package cluster
 import "context"
 
 type DiscoveryDelegate interface {
-	NotifyDiscovered([]Node)
+	NotifyDiscovered([]string)
 }
 
 type DiscoveryDelegateCallbacks struct {
-	NotifyDiscoveredFunc func([]Node)
+	NotifyDiscoveredFunc func([]string)
 }
 
-func (cb *DiscoveryDelegateCallbacks) NotifyDiscovered(nodes []Node) {
+func (cb *DiscoveryDelegateCallbacks) NotifyDiscovered(nodes []string) {
 	if cb.NotifyDiscoveredFunc != nil {
 		cb.NotifyDiscoveredFunc(nodes)
 	}

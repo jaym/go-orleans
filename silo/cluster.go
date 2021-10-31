@@ -29,7 +29,7 @@ func (noopMembershipProtocol) Stop(context.Context) error {
 	return nil
 }
 
-func (noopMembershipProtocol) Join(context.Context, cluster.Node) error {
+func (noopMembershipProtocol) Join(context.Context, []string) error {
 	return errors.New("unimplemented")
 }
 

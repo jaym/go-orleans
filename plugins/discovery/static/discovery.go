@@ -12,10 +12,10 @@ type StaticList struct {
 	closeChan chan struct{}
 	wg        sync.WaitGroup
 	interval  time.Duration
-	nodes     []cluster.Node
+	nodes     []string
 }
 
-func New(nodes []cluster.Node) *StaticList {
+func New(nodes []string) *StaticList {
 	return &StaticList{
 		nodes:     nodes,
 		interval:  time.Minute,

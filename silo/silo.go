@@ -104,10 +104,10 @@ func (s *Silo) Start() error {
 		return err
 	}
 	err = s.discovery.Watch(context.Background(), &cluster.DiscoveryDelegateCallbacks{
-		NotifyDiscoveredFunc: func(nodes []cluster.Node) {
+		NotifyDiscoveredFunc: func(nodes []string) {
 			s.log.V(4).Info("discovered nodes", "nodes", nodes)
-			for _, node := range nodes {
-				s.membershipProtocol.Join(context.Background(), node)
+			if err := s.membershipProtocol.Join(context.Background(), nodes); err != nil {
+				s.log.V(0).Error(err, "failed to join discovered nodes")
 			}
 		},
 	})

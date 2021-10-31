@@ -2,8 +2,6 @@ package memberlist
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -92,11 +90,8 @@ func (m *MembershipProtocol) Start(ctx context.Context, d cluster.MembershipDele
 	return nil
 }
 
-func (m *MembershipProtocol) Join(ctx context.Context, n cluster.Node) error {
-	if n.Name == m.nodeName {
-		return errors.New("cannot join self")
-	}
-	_, err := m.memberlist.Join([]string{fmt.Sprintf("%s:%d", n.Addr.String(), n.Port)})
+func (m *MembershipProtocol) Join(ctx context.Context, nodes []string) error {
+	_, err := m.memberlist.Join(nodes)
 	return err
 }
 

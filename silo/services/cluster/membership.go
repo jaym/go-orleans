@@ -35,7 +35,7 @@ func (cb *MembershipProtocolCallbacks) NotifyLeave(node Node) {
 
 type MembershipProtocol interface {
 	Start(context.Context, MembershipDelegate) error
-	Join(context.Context, Node) error
+	Join(context.Context, []string) error
 	Leave(context.Context) error
 	ListMembers() ([]Node, error)
 }
