@@ -60,6 +60,7 @@ type GrainActivationManagerImpl struct {
 	grainActivations    map[grain.Identity]*activation.LocalGrainActivation
 	localGrainActivator *activation.LocalGrainActivator
 	grainDirectory      cluster.GrainDirectory
+	resourceManager     *activation.ResourceManager
 	//nodeName            cluster.Location
 }
 
@@ -73,16 +74,15 @@ func NewGrainActivationManager(registrar descriptor.Registrar,
 		grainActivations: make(map[grain.Identity]*activation.LocalGrainActivation),
 		grainDirectory:   grainDirectory,
 	}
-	resourceManager := activation.NewResourceManager(8, func(identityes []grain.Identity) {
+	m.resourceManager = activation.NewResourceManager(8, func(identityes []grain.Identity) {
 		for _, a := range identityes {
 			m.EnqueueEvictGrain(EvictGrainRequest{
 				Identity: a,
 			})
 		}
 	})
-	resourceManager.Start()
 	deactivateCallback := func(a grain.Identity) {
-		resourceManager.Remove(a)
+		m.resourceManager.Remove(a)
 		m.lock.Lock()
 		defer m.lock.Unlock()
 		delete(m.grainActivations, a)
@@ -92,10 +92,14 @@ func NewGrainActivationManager(registrar descriptor.Registrar,
 		registrar,
 		siloClient,
 		timerService,
-		resourceManager,
+		m.resourceManager,
 		observerStore,
 		deactivateCallback)
 	return m
+}
+
+func (m *GrainActivationManagerImpl) Start() {
+	m.resourceManager.Start()
 }
 
 func (m *GrainActivationManagerImpl) EnqueueInvokeMethodRequest(req InvokeMethodRequest) error {

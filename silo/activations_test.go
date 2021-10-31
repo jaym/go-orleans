@@ -19,7 +19,6 @@ import (
 	gcontext "github.com/jaym/go-orleans/context"
 	examples "github.com/jaym/go-orleans/examples/proto"
 	"github.com/jaym/go-orleans/grain"
-	"github.com/jaym/go-orleans/grain/descriptor"
 	"github.com/jaym/go-orleans/plugins/codec/protobuf"
 	"github.com/jaym/go-orleans/plugins/observers/psql"
 	"github.com/jaym/go-orleans/silo"
@@ -59,7 +58,7 @@ var ErrTestIt = errors.New("Testing an error")
 func (g *ChirperGrainImpl) PublishMessage(ctx context.Context, req *examples.PublishMessageRequest) (*examples.PublishMessageResponse, error) {
 	fmt.Printf("%v got message %q\n", g.Identity, req.Msg)
 	if g.ID == "err" {
-		return nil, ErrTestIt
+		return nil, errors.Wrap(ErrTestIt, "testing out an error")
 	}
 	observers, err := g.services.ListMessageObservers(ctx)
 	if err != nil {
@@ -87,29 +86,6 @@ func (g *ChirperGrainImpl) OnNotifyMessage(ctx context.Context, req *examples.Ch
 
 func (g *ChirperGrainImpl) Deactivate(ctx context.Context) {
 	fmt.Printf("Deactivating %v\n", g.Identity)
-}
-
-type registrarEntry struct {
-	Description *descriptor.GrainDescription
-	Impl        interface{}
-}
-type TestRegistrar struct {
-	entries map[string]registrarEntry
-}
-
-func (r *TestRegistrar) Register(desc *descriptor.GrainDescription, impl interface{}) {
-	r.entries[desc.GrainType] = registrarEntry{
-		Description: desc,
-		Impl:        impl,
-	}
-}
-
-func (r *TestRegistrar) Lookup(grainType string) (*descriptor.GrainDescription, interface{}, error) {
-	e, ok := r.entries[grainType]
-	if !ok {
-		return nil, nil, errors.New("no impl")
-	}
-	return e.Description, e.Impl, nil
 }
 
 func TestItAll(t *testing.T) {
@@ -141,16 +117,14 @@ func TestItAll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	registrar := &TestRegistrar{
-		entries: make(map[string]registrarEntry),
-	}
-	impl := &ChirperGrainActivatorTestImpl{}
-	examples.RegisterChirperGrainActivator(registrar, impl)
 	stdr.SetVerbosity(4)
 	log := stdr.NewWithOptions(stdlog.New(os.Stderr, "", stdlog.LstdFlags), stdr.Options{LogCaller: stdr.All})
 
 	observerStore := psql.NewObserverStore(log.WithName("observerstore"), pool, psql.WithCodec(protobuf.NewCodec()))
-	s := silo.NewSilo(log, observerStore, registrar)
+	s := silo.NewSilo(log, observerStore)
+	examples.RegisterChirperGrainActivator(s, &ChirperGrainActivatorTestImpl{})
+	s.Start()
+
 	in := &examples.PublishMessageRequest{
 		Msg: "world",
 	}
@@ -213,6 +187,7 @@ func TestItAll(t *testing.T) {
 	chirperGrainErrRef := examples.GetChirperGrain(s.Client(), gErrIdentity)
 	_, err = chirperGrainErrRef.PublishMessage(gcontext.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.True(t, errors.Is(err, ErrTestIt))
+	require.NoError(t, err)
 
 	time.Sleep(3 * time.Second)
 	require.Fail(t, "testing")
