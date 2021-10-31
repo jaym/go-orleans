@@ -123,7 +123,8 @@ func TestItAll(t *testing.T) {
 	observerStore := psql.NewObserverStore(log.WithName("observerstore"), pool, psql.WithCodec(protobuf.NewCodec()))
 	s := silo.NewSilo(log, observerStore)
 	examples.RegisterChirperGrainActivator(s, &ChirperGrainActivatorTestImpl{})
-	s.Start()
+	err = s.Start()
+	require.NoError(t, err)
 
 	in := &examples.PublishMessageRequest{
 		Msg: "world",

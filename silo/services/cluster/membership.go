@@ -6,7 +6,7 @@ import (
 )
 
 type Node struct {
-	Name string
+	Name Location
 	Addr net.IP
 	Port uint16
 }
@@ -16,8 +16,27 @@ type MembershipDelegate interface {
 	NotifyLeave(Node)
 }
 
+type MembershipProtocolCallbacks struct {
+	NotifyJoinFunc  func(Node)
+	NotifyLeaveFunc func(Node)
+}
+
+func (cb *MembershipProtocolCallbacks) NotifyJoin(node Node) {
+	if cb.NotifyJoinFunc != nil {
+		cb.NotifyJoinFunc(node)
+	}
+}
+
+func (cb *MembershipProtocolCallbacks) NotifyLeave(node Node) {
+	if cb.NotifyLeaveFunc != nil {
+		cb.NotifyLeaveFunc(node)
+	}
+}
+
 type MembershipProtocol interface {
-	Join(context.Context, MembershipDelegate) error
+	Start(context.Context, MembershipDelegate) error
+	Stop(context.Context) error
+	Join(context.Context, Node) error
 	Leave(context.Context) error
-	ListMembers() ([]string, error)
+	ListMembers() ([]Node, error)
 }

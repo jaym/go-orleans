@@ -1,13 +1,15 @@
 package silo
 
 import (
+	"context"
+	"sync"
+
 	"github.com/go-logr/logr"
 	"github.com/segmentio/ksuid"
 
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"
 	"github.com/jaym/go-orleans/plugins/codec/protobuf"
-	"github.com/jaym/go-orleans/silo/internal/graindir"
 	"github.com/jaym/go-orleans/silo/internal/transport"
 	"github.com/jaym/go-orleans/silo/services/cluster"
 	"github.com/jaym/go-orleans/silo/services/observer"
@@ -16,31 +18,39 @@ import (
 
 type Silo struct {
 	descriptor.Registrar
-	localGrainManager *GrainActivationManagerImpl
-	client            *siloClientImpl
-	timerService      timer.TimerService
-	observerStore     observer.Store
-	log               logr.Logger
-	nodeName          cluster.Location
-	grainDirectory    cluster.GrainDirectory
-	transportManager  *transport.Manager
+	localGrainManager  *GrainActivationManagerImpl
+	client             *siloClientImpl
+	timerService       timer.TimerService
+	observerStore      observer.Store
+	log                logr.Logger
+	nodeName           cluster.Location
+	grainDirectory     cluster.GrainDirectory
+	transportManager   *transport.Manager
+	discovery          cluster.Discovery
+	membershipProtocol cluster.MembershipProtocol
 }
 
-func NewSilo(log logr.Logger, observerStore observer.Store) *Silo {
+func NewSilo(log logr.Logger, observerStore observer.Store, opts ...SiloOption) *Silo {
+	options := siloOptions{}
+	for _, o := range opts {
+		o(&options)
+	}
+
 	s := &Silo{
 		Registrar: &registrarImpl{
 			entries: map[string]registrarEntry{},
 		},
-		log:           log.WithName("silo"),
-		observerStore: observerStore,
+		log:                log.WithName("silo"),
+		observerStore:      observerStore,
+		nodeName:           options.NodeName(),
+		grainDirectory:     options.GrainDirectory(),
+		discovery:          options.Discovery(),
+		membershipProtocol: options.MembershipProtocol(),
 	}
-	s.nodeName = cluster.Location("mynodename")
-	s.grainDirectory = graindir.NewInmemoryGrainDirectory(s.nodeName)
 	// TODO: do something a little more sensible. With the generic
 	// grain, it is expected to pass in an activator for each
 	// activation. Setting it to nil is will cause a panic with
 	// no information on what went wrong
-	s.Register(&grain_GrainDesc, nil)
 	s.client = &siloClientImpl{
 		log:            s.log.WithName("siloClient"),
 		codec:          protobuf.NewCodec(),
@@ -64,17 +74,55 @@ func NewSilo(log logr.Logger, observerStore observer.Store) *Silo {
 		localGrainManager: s.localGrainManager,
 	}
 	s.transportManager = transport.NewManager(s.log.WithName("transport-manager"), handler)
-	s.transportManager.AddTransport(s.nodeName, &localTransport{
-		log:               s.log.WithName("local-transport"),
-		codec:             s.client.codec,
-		localGrainManager: s.localGrainManager,
-	})
 	s.client.transportManager = s.transportManager
 
 	return s
 }
 
 func (s *Silo) Start() error {
+	joinLock := sync.Mutex{}
+	err := s.membershipProtocol.Start(context.Background(), &cluster.MembershipProtocolCallbacks{
+		NotifyJoinFunc: func(n cluster.Node) {
+			joinLock.Lock()
+			defer joinLock.Unlock()
+			if s.transportManager.IsMember(n.Name) {
+				s.log.V(0).Info("node joined", "node", n)
+				// TODO: create transport
+				//if err := s.transportManager.AddTransport(n.Name, nil); err != nil {
+				//s.log.V(0).Error(err, "failed to join node", "node", n)
+				//}
+			}
+		},
+		NotifyLeaveFunc: func(n cluster.Node) {
+			joinLock.Lock()
+			defer joinLock.Unlock()
+			s.log.V(0).Info("node left", "node", n)
+			s.transportManager.RemoveTransport(n.Name)
+		},
+	})
+	if err != nil {
+		return err
+	}
+	err = s.discovery.Watch(context.Background(), &cluster.DiscoveryDelegateCallbacks{
+		NotifyDiscoveredFunc: func(nodes []cluster.Node) {
+			s.log.V(4).Info("discovered nodes", "nodes", nodes)
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	err = s.transportManager.AddTransport(s.nodeName, &localTransport{
+		log:               s.log.WithName("local-transport"),
+		codec:             s.client.codec,
+		localGrainManager: s.localGrainManager,
+	})
+	if err != nil {
+		return err
+	}
+
+	s.Register(&grain_GrainDesc, nil)
+
 	s.timerService.Start()
 	s.localGrainManager.Start()
 	return nil

@@ -233,6 +233,13 @@ func (m *Manager) RemoveTransport(nodeName cluster.Location) {
 	delete(m.transports, nodeName)
 }
 
+func (m *Manager) IsMember(nodeName cluster.Location) bool {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+	_, ok := m.transports[nodeName]
+	return ok
+}
+
 func (m *Manager) InvokeMethod(ctx context.Context, sender grain.Identity, receiver cluster.GrainAddress, method string, uuid string, payload []byte) (InvokeMethodFuture, error) {
 	t, err := m.getTransport(receiver.Location)
 	if err != nil {
