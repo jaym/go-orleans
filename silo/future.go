@@ -2,7 +2,9 @@ package silo
 
 import (
 	"context"
-	"errors"
+
+	"github.com/cockroachdb/errors"
+	"github.com/gogo/protobuf/proto"
 
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/plugins/codec"
@@ -31,11 +33,18 @@ func newInvokeMethodFuture(codec codec.Codec, f transport.InvokeMethodFuture) *i
 }
 
 func (f *invokeMethodFuture) Await(ctx context.Context) (grain.InvokeMethodResp, error) {
-	data, err := f.f.Await(ctx)
+	payload, errData, err := f.f.Await(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &InvokeMethodResp{codec: f.codec, data: data}, nil
+	if len(errData) > 0 {
+		var encodedError errors.EncodedError
+		if err := proto.Unmarshal(errData, &encodedError); err != nil {
+			return nil, err
+		}
+		return nil, errors.DecodeError(ctx, encodedError)
+	}
+	return &InvokeMethodResp{codec: f.codec, data: payload}, nil
 }
 
 type RegisterObserverResp struct {
@@ -60,8 +69,11 @@ func (f *registerObserverFuture) Await(ctx context.Context) error {
 		return err
 	}
 	if len(errData) > 0 {
-		// TODO: decode this properly
-		return errors.New(string(errData))
+		var encodedError errors.EncodedError
+		if err := proto.Unmarshal(errData, &encodedError); err != nil {
+			return err
+		}
+		return errors.DecodeError(ctx, encodedError)
 	}
 	return nil
 }

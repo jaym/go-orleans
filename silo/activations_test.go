@@ -3,13 +3,13 @@ package silo_test
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	stdlog "log"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/go-logr/stdr"
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -54,8 +54,13 @@ type ChirperGrainImpl struct {
 	services examples.ChirperGrainServices
 }
 
+var ErrTestIt = errors.New("Testing an error")
+
 func (g *ChirperGrainImpl) PublishMessage(ctx context.Context, req *examples.PublishMessageRequest) (*examples.PublishMessageResponse, error) {
 	fmt.Printf("%v got message %q\n", g.Identity, req.Msg)
+	if g.ID == "err" {
+		return nil, ErrTestIt
+	}
 	observers, err := g.services.ListMessageObservers(ctx)
 	if err != nil {
 		return nil, err
@@ -173,6 +178,11 @@ func TestItAll(t *testing.T) {
 		ID:        "u2",
 	}
 
+	gErrIdentity := grain.Identity{
+		GrainType: "ChirperGrain",
+		ID:        "err",
+	}
+
 	chirperGrain1Ref := examples.GetChirperGrain(s.Client(), g1Identity)
 	chirperGrain2Ref := examples.GetChirperGrain(s.Client(), g2Identity)
 	identity, err := examples.CreateChirperGrainMessageObserver(context.Background(), s,
@@ -199,6 +209,10 @@ func TestItAll(t *testing.T) {
 	require.NoError(t, err)
 	resp, err = chirperGrain1Ref.PublishMessage(gcontext.WithIdentityContext(context.Background(), grain.Identity{}), in)
 	require.NoError(t, err)
+
+	chirperGrainErrRef := examples.GetChirperGrain(s.Client(), gErrIdentity)
+	_, err = chirperGrainErrRef.PublishMessage(gcontext.WithIdentityContext(context.Background(), grain.Identity{}), in)
+	require.True(t, errors.Is(err, ErrTestIt))
 
 	time.Sleep(3 * time.Second)
 	require.Fail(t, "testing")

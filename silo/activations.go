@@ -2,9 +2,10 @@ package silo
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"

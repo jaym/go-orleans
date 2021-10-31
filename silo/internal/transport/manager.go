@@ -34,16 +34,16 @@ type TransportHandler interface {
 }
 
 type InvokeMethodPromise interface {
-	Resolve(payload []byte, err error)
+	Resolve(payload []byte, errData []byte)
 }
 
 type invokeMethodFuncPromise struct {
 	f func(payload []byte, err []byte)
 }
 
-func (p invokeMethodFuncPromise) Resolve(payload []byte, err error) {
-	if err != nil {
-		p.f(nil, []byte(err.Error()))
+func (p invokeMethodFuncPromise) Resolve(payload []byte, errData []byte) {
+	if len(errData) > 0 {
+		p.f(nil, errData)
 	} else {
 		p.f(payload, nil)
 	}
@@ -52,38 +52,38 @@ func (p invokeMethodFuncPromise) Resolve(payload []byte, err error) {
 type invokeMethodChanFuture struct {
 	c chan struct {
 		payload []byte
-		err     error
+		errData []byte
 	}
 }
 
-func (f invokeMethodChanFuture) Await(ctx context.Context) ([]byte, error) {
+func (f invokeMethodChanFuture) Await(ctx context.Context) ([]byte, []byte, error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, nil, ctx.Err()
 	case v := <-f.c:
-		return v.payload, v.err
+		return v.payload, v.errData, nil
 	}
 }
 
 type InvokeMethodFuture interface {
-	Await(ctx context.Context) ([]byte, error)
+	Await(ctx context.Context) (payload []byte, errData []byte, err error)
 }
 
 type RegisterObserverPromise interface {
-	Resolve(err error)
+	Resolve(errData []byte)
 }
 
 type RegisterObserverFuture interface {
-	Await(ctx context.Context) ([]byte, error)
+	Await(ctx context.Context) (errData []byte, err error)
 }
 
 type registerObserverFuncPromise struct {
 	f func(err []byte)
 }
 
-func (p registerObserverFuncPromise) Resolve(err error) {
-	if err != nil {
-		p.f([]byte(err.Error()))
+func (p registerObserverFuncPromise) Resolve(errData []byte) {
+	if len(errData) > 0 {
+		p.f(errData)
 	} else {
 		p.f(nil)
 	}
@@ -134,23 +134,19 @@ func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string) 
 	return f
 }
 
-func (h *managedTransportInternal) registerInvokeMethodPromise(uuid string) RegisterObserverFuture {
+func (h *managedTransportInternal) registerInvokeMethodPromise(uuid string) InvokeMethodFuture {
 	f := invokeMethodChanFuture{
 		c: make(chan struct {
 			payload []byte
-			err     error
+			errData []byte
 		}, 1),
 	}
 	p := invokeMethodFuncPromise{
 		f: func(payload []byte, errData []byte) {
-			var err error
-			if len(errData) > 0 {
-				err = errors.New(string(errData))
-			}
 			f.c <- struct {
 				payload []byte
-				err     error
-			}{payload: payload, err: err} // TODO: error encoding
+				errData []byte
+			}{payload: payload, errData: errData}
 		},
 	}
 	h.lock.Lock()
@@ -159,7 +155,7 @@ func (h *managedTransportInternal) registerInvokeMethodPromise(uuid string) Regi
 	return f
 }
 
-func (h *managedTransportInternal) ReceiveAckRegisterObserver(ctx context.Context, receiver grain.Identity, uuid string, err []byte) {
+func (h *managedTransportInternal) ReceiveAckRegisterObserver(ctx context.Context, receiver grain.Identity, uuid string, errData []byte) {
 	h.lock.Lock()
 	defer h.lock.Unlock()
 
@@ -168,15 +164,11 @@ func (h *managedTransportInternal) ReceiveAckRegisterObserver(ctx context.Contex
 		h.log.V(1).Info("promise not found", "handler", "ack-register-observer", "receiver", receiver, "uuid", uuid)
 		return
 	}
-	if err != nil {
-		p.Resolve(errors.New(string(err)))
-	} else {
-		p.Resolve(nil)
-	}
+	p.Resolve(errData)
 	delete(h.invokeMethodPromises, uuid)
 }
 
-func (h *managedTransportInternal) ReceiveInvokeMethodResponse(ctx context.Context, receiver grain.Identity, uuid string, payload []byte, err []byte) {
+func (h *managedTransportInternal) ReceiveInvokeMethodResponse(ctx context.Context, receiver grain.Identity, uuid string, payload []byte, errData []byte) {
 	h.lock.Lock()
 	defer h.lock.Unlock()
 
@@ -185,12 +177,8 @@ func (h *managedTransportInternal) ReceiveInvokeMethodResponse(ctx context.Conte
 		h.log.V(1).Info("promise not found", "handler", "invoke-method-response", "receiver", receiver, "uuid", uuid)
 		return
 	}
-	if err != nil {
-		// TODO: error handling incorrect
-		p.Resolve(nil, errors.New(string(err)))
-	} else {
-		p.Resolve(payload, nil)
-	}
+	p.Resolve(payload, errData)
+
 	delete(h.invokeMethodPromises, uuid)
 }
 

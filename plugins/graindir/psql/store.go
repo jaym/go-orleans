@@ -3,13 +3,14 @@ package psql
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
+
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/plugins/graindir/psql/internal"
 	"github.com/jaym/go-orleans/silo/services/cluster"

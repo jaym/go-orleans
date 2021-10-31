@@ -1,9 +1,10 @@
 package grain
 
 import (
-	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 )
 
 var ErrInvalidIdentity = errors.New("invalid grain identity")

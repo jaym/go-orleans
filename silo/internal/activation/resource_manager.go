@@ -2,9 +2,9 @@ package activation
 
 import (
 	"container/list"
-	"errors"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/jaym/go-orleans/grain"
 )
 

@@ -1,8 +1,9 @@
 package services
 
 import (
-	"errors"
 	"time"
+
+	"github.com/cockroachdb/errors"
 )
 
 var ErrTimerAlreadyRegistered = errors.New("timer already registered")

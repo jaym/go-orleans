@@ -5,6 +5,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
+	gogoproto "github.com/gogo/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	gcontext "github.com/jaym/go-orleans/context"
 	"github.com/jaym/go-orleans/grain"
@@ -17,7 +19,6 @@ import (
 	"github.com/jaym/go-orleans/silo/services/observer"
 	"github.com/jaym/go-orleans/silo/services/timer"
 	"github.com/segmentio/ksuid"
-	"google.golang.org/protobuf/proto"
 )
 
 type Silo struct {
@@ -91,15 +92,15 @@ func (s siloTransportHandler) ReceiveInvokeMethodRequest(ctx context.Context, se
 		in:       payload,
 		ResolveFunc: func(i interface{}, e error) {
 			if e != nil {
-				promise.Resolve(nil, e)
+				promise.Resolve(nil, encodeError(ctx, e))
 			} else {
 				data, err := s.codec.Encode(i)
-				promise.Resolve(data, err)
+				promise.Resolve(data, encodeError(ctx, err))
 			}
 		},
 	})
 	if err != nil {
-		promise.Resolve(nil, err)
+		promise.Resolve(nil, encodeError(ctx, err))
 		s.log.Error(err, "failed to enqueue invoke method", "sender", sender, "receiver", receiver, "method", method)
 	}
 }
@@ -112,15 +113,27 @@ func (s siloTransportHandler) ReceiveRegisterObserverRequest(ctx context.Context
 		In:         payload,
 		ResolveFunc: func(e error) {
 			if e != nil {
-				promise.Resolve(e)
+				promise.Resolve(encodeError(ctx, e))
 			} else {
 				promise.Resolve(nil)
 			}
 		},
 	})
 	if err != nil {
-		promise.Resolve(err)
+		promise.Resolve(encodeError(ctx, err))
 		s.log.Error(err, "failed to enqueue register observer", "observer", observer, "observable", observable, "name", name)
+	}
+}
+
+func encodeError(ctx context.Context, err error) []byte {
+	if err == nil {
+		return nil
+	}
+	encodedErr := errors.EncodeError(ctx, err)
+	if data, err := gogoproto.Marshal(&encodedErr); err != nil {
+		panic(err)
+	} else {
+		return data
 	}
 }
 

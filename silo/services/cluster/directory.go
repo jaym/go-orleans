@@ -2,7 +2,8 @@ package cluster
 
 import (
 	"context"
-	"errors"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/jaym/go-orleans/grain"
 )
