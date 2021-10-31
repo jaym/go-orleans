@@ -106,6 +106,9 @@ func (s *Silo) Start() error {
 	err = s.discovery.Watch(context.Background(), &cluster.DiscoveryDelegateCallbacks{
 		NotifyDiscoveredFunc: func(nodes []cluster.Node) {
 			s.log.V(4).Info("discovered nodes", "nodes", nodes)
+			for _, node := range nodes {
+				s.membershipProtocol.Join(context.Background(), node)
+			}
 		},
 	})
 	if err != nil {
