@@ -32,7 +32,7 @@ func New(log logr.Logger, nodeName cluster.Location, port int) *MembershipProtoc
 func (m *MembershipProtocol) Start(ctx context.Context, d cluster.MembershipDelegate) error {
 	config := hmemberlist.DefaultLANConfig()
 	ch := make(chan memberlist.NodeEvent, 8)
-	config.Events = &ChannelEventDelegate{
+	config.Events = &channelEventDelegate{
 		Ch: ch,
 	}
 	config.BindPort = int(m.port)
@@ -117,11 +117,11 @@ func (m *MembershipProtocol) ListMembers() ([]cluster.Node, error) {
 	return nodes, nil
 }
 
-type ChannelEventDelegate struct {
+type channelEventDelegate struct {
 	Ch chan<- hmemberlist.NodeEvent
 }
 
-func (c *ChannelEventDelegate) NotifyJoin(n *hmemberlist.Node) {
+func (c *channelEventDelegate) NotifyJoin(n *hmemberlist.Node) {
 	node := *n
 	select {
 	case c.Ch <- hmemberlist.NodeEvent{
@@ -131,7 +131,7 @@ func (c *ChannelEventDelegate) NotifyJoin(n *hmemberlist.Node) {
 	}
 }
 
-func (c *ChannelEventDelegate) NotifyLeave(n *hmemberlist.Node) {
+func (c *channelEventDelegate) NotifyLeave(n *hmemberlist.Node) {
 	node := *n
 	select {
 	case c.Ch <- hmemberlist.NodeEvent{
@@ -141,7 +141,7 @@ func (c *ChannelEventDelegate) NotifyLeave(n *hmemberlist.Node) {
 	}
 }
 
-func (c *ChannelEventDelegate) NotifyUpdate(n *memberlist.Node) {
+func (c *channelEventDelegate) NotifyUpdate(n *memberlist.Node) {
 	node := *n
 	select {
 	case c.Ch <- memberlist.NodeEvent{
