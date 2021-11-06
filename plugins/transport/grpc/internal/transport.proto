@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package goor.transport.grpc;
+
+option go_package = "github.com/jaym/go-orleans/plugins/transport/grpc/internal";
+
+/*
+
+
+error EnqueueAckRegisterObserver(ctx context.Context, receiver grain.Identity,
+uuid string, errOut []byte) error EnqueueInvokeMethodResponse(ctx
+context.Context, receiver grain.Identity, uuid string, payload []byte, err
+[]byte) error
+
+*/
+
+message GrainIdentity {
+  string grain_type = 1;
+  string id = 2;
+}
+
+message Hello {
+  string name = 1;
+  string addr = 2;
+  int64 port = 3;
+}
+
+message InvokeMethodReq {
+  GrainIdentity sender = 1;
+  GrainIdentity receiver = 2;
+  string method = 3;
+  string uuid = 4;
+  bytes payload = 5;
+}
+
+message InvokeMethodResp {
+  GrainIdentity receiver = 1;
+  string uuid = 2;
+  bytes payload = 3;
+  bytes err = 4;
+}
+
+message RegisterObserver {
+  GrainIdentity observer = 1;
+  GrainIdentity observable = 2;
+  string name = 3;
+  string uuid = 4;
+  bytes payload = 5;
+}
+
+message ObserverNotification {
+  GrainIdentity sender = 1;
+  repeated GrainIdentity receivers = 2;
+  string observableType = 3;
+  string name = 4;
+  bytes payload = 5;
+}
+
+message AckRegisterObserver {
+  GrainIdentity receiver = 1;
+  string uuid = 2;
+  bytes err = 3;
+}
+
+message TransportMessage {
+  oneof msg {
+    Hello hello = 64;
+    InvokeMethodReq invoke_method_req = 1;
+    InvokeMethodResp invoke_method_resp = 2;
+    RegisterObserver register_observer = 3;
+    ObserverNotification observer_notification = 4;
+    AckRegisterObserver ack_register_observer = 5;
+  }
+}
+
+message SendRequest { TransportMessage msg = 1; }
+
+message SendResponse {}
+
+service Transport { rpc Send(stream TransportMessage) returns (SendResponse); }

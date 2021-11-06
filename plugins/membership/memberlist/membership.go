@@ -2,6 +2,7 @@ package memberlist
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -13,19 +14,40 @@ import (
 )
 
 type MembershipProtocol struct {
-	log        logr.Logger
-	nodeName   cluster.Location
-	port       int
-	wg         sync.WaitGroup
-	closeChan  chan struct{}
-	memberlist *hmemberlist.Memberlist
+	log            logr.Logger
+	nodeName       cluster.Location
+	membershipPort int
+	wg             sync.WaitGroup
+	closeChan      chan struct{}
+	memberlist     *hmemberlist.Memberlist
+	nodeMetadata   *nodeMetadata
 }
 
-func New(log logr.Logger, nodeName cluster.Location, port int) *MembershipProtocol {
+type nodeMetadata struct {
+	RPCPort int
+}
+
+func (m *nodeMetadata) NodeMeta(limit int) []byte {
+	b, _ := json.Marshal(m)
+	return b
+}
+
+func (*nodeMetadata) NotifyMsg([]byte) {}
+
+func (*nodeMetadata) GetBroadcasts(overhead, limit int) [][]byte { return nil }
+
+func (*nodeMetadata) LocalState(join bool) []byte { return nil }
+
+func (*nodeMetadata) MergeRemoteState(buf []byte, join bool) {}
+
+func New(log logr.Logger, nodeName cluster.Location, membershipPort int, rpcPort int) *MembershipProtocol {
 	return &MembershipProtocol{
-		log:      log,
-		nodeName: nodeName,
-		port:     port,
+		log:            log,
+		nodeName:       nodeName,
+		membershipPort: membershipPort,
+		nodeMetadata: &nodeMetadata{
+			RPCPort: rpcPort,
+		},
 	}
 }
 
@@ -35,9 +57,9 @@ func (m *MembershipProtocol) Start(ctx context.Context, d cluster.MembershipDele
 	config.Events = &channelEventDelegate{
 		Ch: ch,
 	}
-	config.BindPort = int(m.port)
+	config.BindPort = int(m.membershipPort)
 	config.Name = string(m.nodeName)
-
+	config.Delegate = m.nodeMetadata
 	list, err := hmemberlist.Create(config)
 	if err != nil {
 		return err
@@ -62,11 +84,15 @@ func (m *MembershipProtocol) Start(ctx context.Context, d cluster.MembershipDele
 					if ev.Node.Name == string(m.nodeName) {
 						continue
 					}
-					m.log.V(1).Info("node joined", "node", ev.Node, "state", ev.Node.State)
+					nodeMeta := nodeMetadata{}
+					json.Unmarshal(ev.Node.Meta, &nodeMeta)
+					m.log.V(1).Info("node joined", "node", ev.Node.Name, "addr", ev.Node.Addr, "port", ev.Node.Port,
+						"metadata", nodeMeta, "state", ev.Node.State)
 					d.NotifyJoin(cluster.Node{
-						Name: cluster.Location(ev.Node.Name),
-						Addr: ev.Node.Addr,
-						Port: ev.Node.Port,
+						Name:           cluster.Location(ev.Node.Name),
+						Addr:           ev.Node.Addr,
+						MembershipPort: ev.Node.Port,
+						RPCPort:        uint16(nodeMeta.RPCPort),
 					})
 				case memberlist.NodeLeave:
 					if ev.Node.Name == string(m.nodeName) {
@@ -109,9 +135,9 @@ func (m *MembershipProtocol) ListMembers() ([]cluster.Node, error) {
 			continue
 		}
 		nodes = append(nodes, cluster.Node{
-			Name: cluster.Location(members[i].Name),
-			Addr: members[i].Addr,
-			Port: members[i].Port,
+			Name:           cluster.Location(members[i].Name),
+			Addr:           members[i].Addr,
+			MembershipPort: members[i].Port,
 		})
 	}
 	return nodes, nil

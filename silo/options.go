@@ -11,6 +11,7 @@ type siloOptions struct {
 	nodeName           cluster.Location
 	grainDirectory     cluster.GrainDirectory
 	membershipProtocol cluster.MembershipProtocol
+	transportFactory   cluster.TransportFactory
 	discovery          cluster.Discovery
 }
 
@@ -46,6 +47,10 @@ func (so *siloOptions) MembershipProtocol() cluster.MembershipProtocol {
 	return so.membershipProtocol
 }
 
+func (so *siloOptions) TransportFactory() cluster.TransportFactory {
+	return so.transportFactory
+}
+
 type SiloOption func(*siloOptions)
 
 func WithNodeName(s string) SiloOption {
@@ -60,9 +65,10 @@ func WithGrainDirectory(d cluster.GrainDirectory) SiloOption {
 	}
 }
 
-func WithMembershipProtocol(m cluster.MembershipProtocol) SiloOption {
+func WithMembership(m cluster.MembershipProtocol, transportFactory cluster.TransportFactory) SiloOption {
 	return func(so *siloOptions) {
 		so.membershipProtocol = m
+		so.transportFactory = transportFactory
 	}
 }
 

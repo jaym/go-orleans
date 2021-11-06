@@ -34,8 +34,9 @@ func (s *siloClientImpl) getGrainAddress(ctx context.Context, ident grain.Identi
 }
 
 func (s *siloClientImpl) placeGrain(ctx context.Context, ident grain.Identity) (cluster.GrainAddress, error) {
+	nodeName := s.transportManager.RandomNode()
 	return cluster.GrainAddress{
-		Location: cluster.Location(s.nodeName),
+		Location: cluster.Location(nodeName),
 		Identity: ident,
 	}, nil
 }

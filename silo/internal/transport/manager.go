@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -17,6 +18,7 @@ type Manager struct {
 	log        logr.Logger
 	handler    TransportHandler
 	transports map[cluster.Location]*managedTransport
+	nodeNames  []string
 }
 
 func NewManager(log logr.Logger, handler TransportHandler) *Manager {
@@ -24,6 +26,7 @@ func NewManager(log logr.Logger, handler TransportHandler) *Manager {
 		log:        log,
 		handler:    handler,
 		transports: make(map[cluster.Location]*managedTransport),
+		nodeNames:  []string{},
 	}
 }
 
@@ -117,6 +120,11 @@ type managedTransportInternal struct {
 	registerObserverPromises map[string]RegisterObserverPromise
 }
 
+func (h *managedTransportInternal) stop() error {
+	return h.transport.Stop()
+	//TODO: fail all the promises
+}
+
 func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string) RegisterObserverFuture {
 	f := registerObserverChanFuture{
 		c: make(chan struct {
@@ -207,12 +215,17 @@ func (h *managedTransportInternal) ReceiveRegisterObserverRequest(ctx context.Co
 	h.TransportHandler.ReceiveRegisterObserverRequest(ctx, observer, observable, name, payload, p)
 }
 
-func (m *Manager) AddTransport(nodeName cluster.Location, transport cluster.Transport) error {
+func (m *Manager) AddTransport(nodeName cluster.Location, creator func() (cluster.Transport, error)) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
 	if _, ok := m.transports[nodeName]; ok {
 		return errors.New("transport already exists")
+	}
+
+	transport, err := creator()
+	if err != nil {
+		return err
 	}
 
 	mt := &managedTransport{
@@ -224,13 +237,19 @@ func (m *Manager) AddTransport(nodeName cluster.Location, transport cluster.Tran
 		},
 	}
 	m.transports[nodeName] = mt
+	m.nodeNames = append(m.nodeNames, string(nodeName))
 	return transport.Listen(mt.internal)
 }
 
 func (m *Manager) RemoveTransport(nodeName cluster.Location) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	delete(m.transports, nodeName)
+	if tp, ok := m.transports[nodeName]; ok {
+		if err := tp.internal.stop(); err != nil {
+			m.log.Error(err, "failed to stop transport", "node", nodeName)
+		}
+		delete(m.transports, nodeName)
+	}
 }
 
 func (m *Manager) IsMember(nodeName cluster.Location) bool {
@@ -279,6 +298,13 @@ func (m *Manager) ObserverNotificationAsync(ctx context.Context, sender grain.Id
 		}
 	}
 	return combinedErrors
+}
+
+func (m *Manager) RandomNode() string {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+	idx := rand.Intn(len(m.nodeNames))
+	return m.nodeNames[idx]
 }
 
 func (m *Manager) getTransport(l cluster.Location) (*managedTransport, error) {

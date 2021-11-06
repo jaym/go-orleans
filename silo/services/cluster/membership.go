@@ -6,9 +6,10 @@ import (
 )
 
 type Node struct {
-	Name Location
-	Addr net.IP
-	Port uint16
+	Name           Location
+	Addr           net.IP
+	MembershipPort uint16
+	RPCPort        uint16
 }
 
 type MembershipDelegate interface {

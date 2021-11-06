@@ -4,11 +4,13 @@ go 1.17
 
 require (
 	github.com/fergusstrange/embedded-postgres v1.11.0
+	github.com/go-logr/logr v1.1.0
 	github.com/go-logr/stdr v1.1.0
 	github.com/jackc/pgx/v4 v4.13.0
 	github.com/jaym/go-orleans v0.0.0
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.7.0
+	google.golang.org/grpc v1.41.0
 )
 
 require (
@@ -20,9 +22,9 @@ require (
 	github.com/cockroachdb/sentry-go v0.6.1-cockroachdb.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dsnet/compress v0.0.1 // indirect
-	github.com/go-logr/logr v1.1.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-migrate/migrate/v4 v4.15.1-0.20211015165204-1ba9becc5c8d // indirect
+	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/btree v1.0.0 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
@@ -59,6 +61,7 @@ require (
 	golang.org/x/net v0.0.0-20211013171255-e13a2654a71e // indirect
 	golang.org/x/sys v0.0.0-20211013075003-97ac67df715c // indirect
 	golang.org/x/text v0.3.7 // indirect
+	google.golang.org/genproto v0.0.0-20211013025323-ce878158c4d4 // indirect
 	google.golang.org/protobuf v1.27.1 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 )

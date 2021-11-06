@@ -28,6 +28,7 @@ type Silo struct {
 	transportManager   *transport.Manager
 	discovery          cluster.Discovery
 	membershipProtocol cluster.MembershipProtocol
+	transportFactory   cluster.TransportFactory
 }
 
 func NewSilo(log logr.Logger, observerStore observer.Store, opts ...SiloOption) *Silo {
@@ -46,6 +47,7 @@ func NewSilo(log logr.Logger, observerStore observer.Store, opts ...SiloOption) 
 		grainDirectory:     options.GrainDirectory(),
 		discovery:          options.Discovery(),
 		membershipProtocol: options.MembershipProtocol(),
+		transportFactory:   options.TransportFactory(),
 	}
 	// TODO: do something a little more sensible. With the generic
 	// grain, it is expected to pass in an activator for each
@@ -75,7 +77,6 @@ func NewSilo(log logr.Logger, observerStore observer.Store, opts ...SiloOption) 
 	}
 	s.transportManager = transport.NewManager(s.log.WithName("transport-manager"), handler)
 	s.client.transportManager = s.transportManager
-
 	return s
 }
 
@@ -85,13 +86,15 @@ func (s *Silo) Start() error {
 		NotifyJoinFunc: func(n cluster.Node) {
 			joinLock.Lock()
 			defer joinLock.Unlock()
-			if s.transportManager.IsMember(n.Name) {
-				s.log.V(0).Info("node joined", "node", n)
-				// TODO: create transport
-				//if err := s.transportManager.AddTransport(n.Name, nil); err != nil {
-				//s.log.V(0).Error(err, "failed to join node", "node", n)
-				//}
+
+			s.log.V(0).Info("node joined", "node", n)
+			// TODO: create transport
+			if err := s.transportManager.AddTransport(n.Name, func() (cluster.Transport, error) {
+				return s.transportFactory.CreateTransport(n)
+			}); err != nil {
+				s.log.V(0).Error(err, "failed to join node", "node", n)
 			}
+
 		},
 		NotifyLeaveFunc: func(n cluster.Node) {
 			joinLock.Lock()
@@ -115,10 +118,12 @@ func (s *Silo) Start() error {
 		return err
 	}
 
-	err = s.transportManager.AddTransport(s.nodeName, &localTransport{
-		log:               s.log.WithName("local-transport"),
-		codec:             s.client.codec,
-		localGrainManager: s.localGrainManager,
+	err = s.transportManager.AddTransport(s.nodeName, func() (cluster.Transport, error) {
+		return &localTransport{
+			log:               s.log.WithName("local-transport"),
+			codec:             s.client.codec,
+			localGrainManager: s.localGrainManager,
+		}, nil
 	})
 	if err != nil {
 		return err

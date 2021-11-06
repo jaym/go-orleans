@@ -5,21 +5,26 @@ import (
 	"database/sql"
 	"fmt"
 	stdlog "log"
+	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
+	"github.com/go-logr/logr"
 	"github.com/go-logr/stdr"
 	"github.com/jackc/pgx/v4/pgxpool"
 	_ "github.com/jackc/pgx/v4/stdlib"
+	gcontext "github.com/jaym/go-orleans/context"
 	examples "github.com/jaym/go-orleans/examples/proto"
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/plugins/codec/protobuf"
 	"github.com/jaym/go-orleans/plugins/discovery/static"
 	"github.com/jaym/go-orleans/plugins/membership/memberlist"
 	"github.com/jaym/go-orleans/plugins/observers/psql"
+	observer_psql "github.com/jaym/go-orleans/plugins/observers/psql"
+	"github.com/jaym/go-orleans/plugins/transport/grpc"
 	"github.com/jaym/go-orleans/silo"
 	"github.com/jaym/go-orleans/silo/services/cluster"
 	"github.com/pkg/errors"
@@ -57,7 +62,7 @@ type ChirperGrainImpl struct {
 var ErrTestIt = errors.New("Testing an error")
 
 func (g *ChirperGrainImpl) PublishMessage(ctx context.Context, req *examples.PublishMessageRequest) (*examples.PublishMessageResponse, error) {
-	fmt.Printf("%v got message %q\n", g.Identity, req.Msg)
+	fmt.Printf(">>>> %v got message %q\n", g.Identity, req.Msg)
 	if g.ID == "err" {
 		return nil, errors.Wrap(ErrTestIt, "testing out an error")
 	}
@@ -90,12 +95,15 @@ func (g *ChirperGrainImpl) Deactivate(ctx context.Context) {
 }
 
 func main() {
-	var port int
+	var membershipPort int
+	var rpcPort int
 	switch os.Args[1] {
 	case "node1":
-		port = 9991
+		membershipPort = 9991
+		rpcPort = 8991
 	case "node2":
-		port = 9992
+		membershipPort = 9992
+		rpcPort = 8992
 	default:
 		panic("wrong")
 	}
@@ -111,18 +119,19 @@ func main() {
 		}()
 	}
 
-	pool, err := pgxpool.Connect(context.Background(), "postgres://postgres:postgres@localhost:5432/postgres")
+	poolObservers, err := pgxpool.Connect(context.Background(), "postgres://postgres:postgres@localhost:5432/postgres")
 	if err != nil {
 		panic(err)
 	}
 
-	stdDb, err := sql.Open("pgx", pool.Config().ConnString())
+	fmt.Println(poolObservers.Config().ConnString())
+	stdDb, err := sql.Open("pgx", poolObservers.Config().ConnString())
 	if err != nil {
 		panic(err)
 	}
 
-	if err := psql.SetupDatabase(stdDb); err != nil {
-		// panic(err)
+	if err := observer_psql.SetupDatabase(stdDb); err != nil {
+		panic(err)
 	}
 
 	if err := stdDb.Close(); err != nil {
@@ -132,11 +141,19 @@ func main() {
 	stdr.SetVerbosity(4)
 	log := stdr.NewWithOptions(stdlog.New(os.Stderr, "", stdlog.LstdFlags), stdr.Options{LogCaller: stdr.All})
 
-	observerStore := psql.NewObserverStore(log.WithName("observerstore"), pool, psql.WithCodec(protobuf.NewCodec()))
+	observerStore := observer_psql.NewObserverStore(log.WithName("observerstore"), poolObservers, psql.WithCodec(protobuf.NewCodec()))
 	d := static.New([]string{"127.0.0.1:9991", "127.0.0.1:9992"})
 
-	mp := memberlist.New(log, cluster.Location(os.Args[1]), port)
-	s := silo.NewSilo(log, observerStore, silo.WithNodeName(os.Args[1]), silo.WithDiscovery(d), silo.WithMembershipProtocol(mp))
+	orlServer, err := grpc.New(log.WithName("grpc"), os.Args[1], fmt.Sprintf("127.0.0.1:%d", rpcPort))
+	if err != nil {
+		panic(err)
+	}
+	if err := orlServer.Start(); err != nil {
+		panic(err)
+	}
+
+	mp := memberlist.New(log, cluster.Location(os.Args[1]), membershipPort, rpcPort)
+	s := silo.NewSilo(log, observerStore, silo.WithNodeName(os.Args[1]), silo.WithDiscovery(d), silo.WithMembership(mp, orlServer))
 	examples.RegisterChirperGrainActivator(s, &ChirperGrainActivatorTestImpl{})
 	if err := s.Start(); err != nil {
 		panic(err)
@@ -147,6 +164,31 @@ func main() {
 	// Register the signals we want to be notified, these 3 indicate exit
 	// signals, similar to CTRL+C
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+
+	go func(log logr.Logger, client grain.SiloClient) {
+		time.Sleep(2 * time.Second)
+		ctx := gcontext.WithIdentityContext(context.Background(), grain.Identity{})
+		for {
+			i := rand.Intn(64)
+			gident := grain.Identity{
+				GrainType: "ChirperGrain",
+				ID:        fmt.Sprintf("g%d", i),
+			}
+			log.Info("Calling grain", "grain", gident)
+
+			grainRef := examples.GetChirperGrain(client, gident)
+			resp, err := grainRef.PublishMessage(ctx, &examples.PublishMessageRequest{
+				Msg: fmt.Sprintf("calling for %d", i),
+			})
+			if err != nil {
+				log.Error(err, "failed to call chirper grain", "grain", gident)
+			} else {
+				log.Info("got response", "msg", resp.Foobar)
+			}
+			time.Sleep(5 * time.Second)
+		}
+
+	}(log.WithName("clienter"), s.Client())
 
 	<-stop
 }
