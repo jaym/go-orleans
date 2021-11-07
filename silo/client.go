@@ -56,21 +56,17 @@ func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver grain.Identi
 	}
 	bytes, err := proto.Marshal(in)
 	if err != nil {
-		log.Error(err, "failed to marshal")
-		// TODO: error handling
-		panic(err)
+		return invokeMethodFailedFuture{err: err}
 	}
 
 	addr, err := s.getGrainAddress(ctx, receiver)
 	if err != nil {
-		// TODO: error handling
-		panic(err)
+		return invokeMethodFailedFuture{err: err}
 	}
 
 	f, err := s.transportManager.InvokeMethod(ctx, *sender, addr, method, id, bytes)
 	if err != nil {
-		// TODO: error handling
-		panic(err)
+		return invokeMethodFailedFuture{err: err}
 	}
 
 	return newInvokeMethodFuture(s.codec, f)
@@ -86,19 +82,17 @@ func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer grain.Id
 
 	data, err := proto.Marshal(in)
 	if err != nil {
-		log.Error(err, "failed to marshal")
-		panic(err)
+		return registerObserverFailedFuture{err: err}
 	}
 
 	addr, err := s.getGrainAddress(ctx, observable)
 	if err != nil {
-		// TODO: error handling
-		panic(err)
+		return registerObserverFailedFuture{err: err}
 	}
 
 	f, err := s.transportManager.RegisterObserver(ctx, observer, addr, name, id, data)
 	if err != nil {
-		panic(err)
+		return registerObserverFailedFuture{err: err}
 	}
 
 	return newRegisterObserverFuture(s.codec, f)

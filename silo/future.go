@@ -47,6 +47,14 @@ func (f *invokeMethodFuture) Await(ctx context.Context) (grain.InvokeMethodResp,
 	return &InvokeMethodResp{codec: f.codec, data: payload}, nil
 }
 
+type invokeMethodFailedFuture struct {
+	err error
+}
+
+func (f invokeMethodFailedFuture) Await(ctx context.Context) (grain.InvokeMethodResp, error) {
+	return nil, f.err
+}
+
 type RegisterObserverResp struct {
 	Err error
 }
@@ -76,4 +84,12 @@ func (f *registerObserverFuture) Await(ctx context.Context) error {
 		return errors.DecodeError(ctx, encodedError)
 	}
 	return nil
+}
+
+type registerObserverFailedFuture struct {
+	err error
+}
+
+func (f registerObserverFailedFuture) Await(ctx context.Context) error {
+	return f.err
 }

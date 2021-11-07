@@ -113,7 +113,7 @@ type managedTransport struct {
 
 type managedTransportInternal struct {
 	TransportHandler
-	log                      *logr.Logger
+	log                      logr.Logger
 	transport                cluster.Transport
 	lock                     sync.Mutex
 	invokeMethodPromises     map[string]InvokeMethodPromise
@@ -230,6 +230,7 @@ func (m *Manager) AddTransport(nodeName cluster.Location, creator func() (cluste
 
 	mt := &managedTransport{
 		internal: &managedTransportInternal{
+			log:                      m.log.WithName(string(nodeName)),
 			transport:                transport,
 			TransportHandler:         m.handler,
 			invokeMethodPromises:     make(map[string]InvokeMethodPromise),
