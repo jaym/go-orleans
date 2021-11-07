@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	stdlog "log"
 	"math/rand"
@@ -14,13 +13,13 @@ import (
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/stdr"
-	"github.com/jackc/pgx/v4/pgxpool"
 	_ "github.com/jackc/pgx/v4/stdlib"
 	gcontext "github.com/jaym/go-orleans/context"
 	examples "github.com/jaym/go-orleans/examples/proto"
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/plugins/codec/protobuf"
 	"github.com/jaym/go-orleans/plugins/discovery/static"
+	graindir_psql "github.com/jaym/go-orleans/plugins/graindir/psql"
 	"github.com/jaym/go-orleans/plugins/membership/memberlist"
 	"github.com/jaym/go-orleans/plugins/observers/psql"
 	observer_psql "github.com/jaym/go-orleans/plugins/observers/psql"
@@ -119,22 +118,13 @@ func main() {
 		}()
 	}
 
-	poolObservers, err := pgxpool.Connect(context.Background(), "postgres://postgres:postgres@localhost:5432/postgres")
+	poolObservers, err := setupDatabase(context.Background(), "observers", observer_psql.SetupDatabase)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println(poolObservers.Config().ConnString())
-	stdDb, err := sql.Open("pgx", poolObservers.Config().ConnString())
+	poolGrainDir, err := setupDatabase(context.Background(), "graindir", graindir_psql.SetupDatabase)
 	if err != nil {
-		panic(err)
-	}
-
-	if err := observer_psql.SetupDatabase(stdDb); err != nil {
-		panic(err)
-	}
-
-	if err := stdDb.Close(); err != nil {
 		panic(err)
 	}
 
@@ -143,6 +133,8 @@ func main() {
 
 	observerStore := observer_psql.NewObserverStore(log.WithName("observerstore"), poolObservers, psql.WithCodec(protobuf.NewCodec()))
 	d := static.New([]string{"127.0.0.1:9991", "127.0.0.1:9992"})
+
+	grainDir := graindir_psql.NewGrainDirectory(log.WithName("graindir"), poolGrainDir)
 
 	orlServer, err := grpc.New(log.WithName("grpc"), os.Args[1], fmt.Sprintf("127.0.0.1:%d", rpcPort))
 	if err != nil {
@@ -153,7 +145,11 @@ func main() {
 	}
 
 	mp := memberlist.New(log, cluster.Location(os.Args[1]), membershipPort, rpcPort)
-	s := silo.NewSilo(log, observerStore, silo.WithNodeName(os.Args[1]), silo.WithDiscovery(d), silo.WithMembership(mp, orlServer))
+	s := silo.NewSilo(log, observerStore, silo.WithNodeName(os.Args[1]),
+		silo.WithNodeName(os.Args[1]),
+		silo.WithDiscovery(d),
+		silo.WithMembership(mp, orlServer),
+		silo.WithGrainDirectory(grainDir))
 	examples.RegisterChirperGrainActivator(s, &ChirperGrainActivatorTestImpl{})
 	if err := s.Start(); err != nil {
 		panic(err)

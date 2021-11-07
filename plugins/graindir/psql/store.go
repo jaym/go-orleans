@@ -56,6 +56,9 @@ func (m *PSQLStore) Lookup(ctx context.Context, ident grain.Identity) (cluster.G
 
 func (m *PSQLStore) Activate(ctx context.Context, addr cluster.GrainAddress) error {
 	m.log.V(5).Info("storing grain activation", "addr", addr)
+	if addr.Location == "" {
+		panic("no location specified")
+	}
 	err := m.q.InsertGrain(ctx, internal.InsertGrainParams{
 		NodeName:  string(addr.Location),
 		GrainType: addr.GrainType,

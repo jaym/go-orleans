@@ -68,7 +68,7 @@ func NewSilo(log logr.Logger, observerStore observer.Store, opts ...SiloOption) 
 			s.log.V(1).Error(err, "failed to trigger timer notification", "identity", grainAddr, "triggerName", name)
 		}
 	})
-	s.localGrainManager = NewGrainActivationManager(s.Registrar, s.client, s.timerService, s.observerStore, s.grainDirectory)
+	s.localGrainManager = NewGrainActivationManager(s.Registrar, s.nodeName, s.client, s.timerService, s.observerStore, s.grainDirectory)
 
 	handler := siloTransportHandler{
 		log:               s.log.WithName("transport-handler"),

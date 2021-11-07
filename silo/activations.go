@@ -61,16 +61,18 @@ type GrainActivationManagerImpl struct {
 	localGrainActivator *activation.LocalGrainActivator
 	grainDirectory      cluster.GrainDirectory
 	resourceManager     *activation.ResourceManager
-	//nodeName            cluster.Location
+	nodeName            cluster.Location
 }
 
 func NewGrainActivationManager(registrar descriptor.Registrar,
+	nodeName cluster.Location,
 	siloClient grain.SiloClient,
 	timerService timer.TimerService,
 	observerStore observer.Store,
 	grainDirectory cluster.GrainDirectory,
 ) *GrainActivationManagerImpl {
 	m := &GrainActivationManagerImpl{
+		nodeName:         nodeName,
 		grainActivations: make(map[grain.Identity]*activation.LocalGrainActivation),
 		grainDirectory:   grainDirectory,
 	}
@@ -189,7 +191,9 @@ func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allo
 		if allowActivation {
 			var err error
 			// TODO: doing an RPC while holding the lock sucks. Maybe there's a better way to do this
-			if err = m.grainDirectory.Activate(context.TODO(), cluster.GrainAddress{Identity: receiver}); err != nil {
+			if err = m.grainDirectory.Activate(context.TODO(), cluster.GrainAddress{
+				Location: m.nodeName,
+				Identity: receiver}); err != nil {
 				return nil, err
 			}
 			a, err = m.localGrainActivator.ActivateGrainWithDefaultActivator(receiver)
@@ -203,30 +207,6 @@ func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allo
 	}
 	return a, nil
 }
-
-/*
-func (m *GrainActivationManagerImpl) getGrainAddress(ctx context.Context, ident grain.Identity) (cluster.GrainAddress, error) {
-	grainAddress, err := m.grainDirectory.Lookup(ctx, ident)
-	if err != nil {
-		if err == cluster.ErrGrainActivationNotFound {
-			return m.placeGrain(ctx, ident)
-		}
-		return cluster.GrainAddress{}, err
-	}
-	return grainAddress, nil
-}
-
-func (m *GrainActivationManagerImpl) placeGrain(ctx context.Context, ident grain.Identity) (cluster.GrainAddress, error) {
-	return cluster.GrainAddress{
-		Location: cluster.Location(m.nodeName),
-		Identity: ident,
-	}, nil
-}
-
-func (m *GrainActivationManagerImpl) isLocal(addr cluster.GrainAddress) bool {
-	return m.nodeName == addr.Location
-}
-*/
 
 var ErrInboxFull = errors.New("inbox full")
 var ErrGrainActivationNotFound = errors.New("grain activation not found")
