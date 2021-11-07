@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/go-logr/logr"
 
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"
@@ -57,6 +58,7 @@ type TimerTriggerNotification struct {
 
 type GrainActivationManagerImpl struct {
 	lock                sync.Mutex
+	log                 logr.Logger
 	grainActivations    map[grain.Identity]*activation.LocalGrainActivation
 	localGrainActivator *activation.LocalGrainActivator
 	grainDirectory      cluster.GrainDirectory
@@ -64,7 +66,9 @@ type GrainActivationManagerImpl struct {
 	nodeName            cluster.Location
 }
 
-func NewGrainActivationManager(registrar descriptor.Registrar,
+func NewGrainActivationManager(
+	log logr.Logger,
+	registrar descriptor.Registrar,
 	nodeName cluster.Location,
 	siloClient grain.SiloClient,
 	timerService timer.TimerService,
@@ -72,6 +76,7 @@ func NewGrainActivationManager(registrar descriptor.Registrar,
 	grainDirectory cluster.GrainDirectory,
 ) *GrainActivationManagerImpl {
 	m := &GrainActivationManagerImpl{
+		log:              log,
 		nodeName:         nodeName,
 		grainActivations: make(map[grain.Identity]*activation.LocalGrainActivation),
 		grainDirectory:   grainDirectory,
@@ -84,6 +89,12 @@ func NewGrainActivationManager(registrar descriptor.Registrar,
 		}
 	})
 	deactivateCallback := func(a grain.Identity) {
+		if err := m.grainDirectory.Deactivate(context.TODO(), cluster.GrainAddress{
+			Location: m.nodeName,
+			Identity: a,
+		}); err != nil {
+			log.Error(err, "failed to deactivate grain", "grain", a)
+		}
 		m.resourceManager.Remove(a)
 		m.lock.Lock()
 		defer m.lock.Unlock()
