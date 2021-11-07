@@ -181,7 +181,7 @@ func main() {
 			} else {
 				log.Info("got response", "msg", resp.Foobar)
 			}
-			time.Sleep(5 * time.Second)
+			time.Sleep(1 * time.Second)
 		}
 
 	}(log.WithName("clienter"), s.Client())

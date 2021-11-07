@@ -266,10 +266,12 @@ func (m *Manager) InvokeMethod(ctx context.Context, sender grain.Identity, recei
 		return nil, err
 	}
 
+	f := t.internal.registerInvokeMethodPromise(uuid)
 	if err := t.internal.transport.EnqueueInvokeMethodRequest(ctx, sender, receiver.Identity, method, uuid, payload); err != nil {
+		// TODO: if an error is returned, its possible that we never resolved the promise
 		return nil, err
 	}
-	return t.internal.registerInvokeMethodPromise(uuid), nil
+	return f, nil
 }
 
 func (m *Manager) RegisterObserver(ctx context.Context, observer grain.Identity, observable cluster.GrainAddress, name string, uuid string, payload []byte) (RegisterObserverFuture, error) {
@@ -277,10 +279,13 @@ func (m *Manager) RegisterObserver(ctx context.Context, observer grain.Identity,
 	if err != nil {
 		return nil, err
 	}
+
+	f := t.internal.registerRegisterObserverPromise(uuid)
 	if err := t.internal.transport.EnqueueRegisterObserverRequest(ctx, observer, observable.Identity, name, uuid, payload); err != nil {
+		// TODO: if an error is returned, its possible that we never resolved the promise
 		return nil, err
 	}
-	return t.internal.registerRegisterObserverPromise(uuid), nil
+	return f, nil
 }
 
 func (m *Manager) ObserverNotificationAsync(ctx context.Context, sender grain.Identity, receivers []cluster.GrainAddress, observableType string, name string, payload []byte) error {

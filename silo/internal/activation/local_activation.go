@@ -3,9 +3,9 @@ package activation
 import (
 	"context"
 	"fmt"
+	"runtime/pprof"
 
 	"github.com/cockroachdb/errors"
-	gcontext "github.com/jaym/go-orleans/context"
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"
 	"github.com/jaym/go-orleans/silo/services/observer"
@@ -149,11 +149,16 @@ func (g *LocalGrainActivation) findObserableDesc(grainType, name string) (*descr
 }
 
 func (l *LocalGrainActivation) start() {
-	go l.loop()
+	pprof.Do(
+		context.Background(),
+		pprof.Labels("grain", l.identity.GrainType, "id", l.identity.ID),
+		func(ctx context.Context) {
+			go l.loop(ctx)
+		},
+	)
 }
 
-func (l *LocalGrainActivation) loop() {
-	ctx := gcontext.WithIdentityContext(context.Background(), l.identity)
+func (l *LocalGrainActivation) loop(ctx context.Context) {
 	observerManager := newGrainObserverManager(l.identity, l.grainActivator.observerStore, l.grainActivator.siloClient)
 
 	l.grainTimerService = &grainTimerServiceImpl{
