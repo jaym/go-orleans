@@ -250,6 +250,11 @@ func (m *Manager) RemoveTransport(nodeName cluster.Location) {
 			m.log.Error(err, "failed to stop transport", "node", nodeName)
 		}
 		delete(m.transports, nodeName)
+		nodeNames := make([]string, 0, len(m.transports))
+		for l := range m.transports {
+			nodeNames = append(nodeNames, string(l))
+		}
+		m.nodeNames = nodeNames
 	}
 }
 
