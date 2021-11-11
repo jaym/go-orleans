@@ -8,7 +8,6 @@ require (
 	github.com/go-logr/logr v1.1.0
 	github.com/go-logr/stdr v1.1.0
 	github.com/gogo/protobuf v1.3.2
-	github.com/gogo/status v1.1.0
 	github.com/golang-migrate/migrate/v4 v4.15.1-0.20211015165204-1ba9becc5c8d
 	github.com/hashicorp/go-multierror v1.1.0
 	github.com/hashicorp/memberlist v0.2.4
@@ -28,7 +27,6 @@ require (
 	github.com/cockroachdb/sentry-go v0.6.1-cockroachdb.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dsnet/compress v0.0.1 // indirect
-	github.com/gogo/googleapis v1.4.1 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/btree v1.0.0 // indirect

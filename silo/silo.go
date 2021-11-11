@@ -88,7 +88,7 @@ func NewSilo(log logr.Logger, observerStore observer.Store, opts ...SiloOption) 
 	return s
 }
 
-func (s *Silo) Start() error {
+func (s *Silo) Start(ctx context.Context) error {
 	joinLock := sync.Mutex{}
 	err := s.membershipProtocol.Start(context.Background(), &cluster.MembershipProtocolCallbacks{
 		NotifyJoinFunc: func(n cluster.Node) {
@@ -139,9 +139,7 @@ func (s *Silo) Start() error {
 
 	s.Register(&grain_GrainDesc, nil)
 
-	s.timerService.Start()
-	s.localGrainManager.Start()
-	return nil
+	return s.localGrainManager.Start(ctx)
 }
 
 func (s *Silo) Client() grain.SiloClient {

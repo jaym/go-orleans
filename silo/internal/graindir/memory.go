@@ -21,12 +21,17 @@ func NewInmemoryGrainDirectory(local cluster.Location) *InmemoryGrainDirectory {
 	}
 }
 
-func (m *InmemoryGrainDirectory) Start(context.Context) error {
-	return nil
+type inmemoryGrainDirectoryLock struct {
+	l cluster.Location
+	d *InmemoryGrainDirectory
 }
 
-func (m *InmemoryGrainDirectory) Stop(context.Context) error {
-	return nil
+func (m *InmemoryGrainDirectory) Lock(ctx context.Context, l cluster.Location,
+	f cluster.GrainDirectoryLockOnExpirationFunc) (cluster.GrainDirectoryLock, error) {
+	return &inmemoryGrainDirectoryLock{
+		l: l,
+		d: m,
+	}, nil
 }
 
 func (m *InmemoryGrainDirectory) Lookup(ctx context.Context, ident grain.Identity) (cluster.GrainAddress, error) {
@@ -43,7 +48,7 @@ func (m *InmemoryGrainDirectory) Lookup(ctx context.Context, ident grain.Identit
 	return cluster.GrainAddress{}, cluster.ErrGrainActivationNotFound
 }
 
-func (m *InmemoryGrainDirectory) Activate(ctx context.Context, addr cluster.GrainAddress) error {
+func (m *InmemoryGrainDirectory) activate(ctx context.Context, addr cluster.GrainAddress) error {
 	if addr.Location != m.local {
 		return nil
 	}
@@ -56,7 +61,7 @@ func (m *InmemoryGrainDirectory) Activate(ctx context.Context, addr cluster.Grai
 	return nil
 }
 
-func (m *InmemoryGrainDirectory) Deactivate(ctx context.Context, addr cluster.GrainAddress) error {
+func (m *InmemoryGrainDirectory) deactivate(ctx context.Context, addr cluster.GrainAddress) error {
 	if addr.Location != m.local {
 		return nil
 	}
@@ -66,5 +71,31 @@ func (m *InmemoryGrainDirectory) Deactivate(ctx context.Context, addr cluster.Gr
 
 	delete(m.localGrains, addr.Identity)
 
+	return nil
+}
+
+func (l *inmemoryGrainDirectoryLock) Activate(ctx context.Context, ident grain.Identity) error {
+	return l.d.activate(ctx, cluster.GrainAddress{
+		Location: l.l,
+		Identity: ident,
+	})
+}
+
+func (l *inmemoryGrainDirectoryLock) Deactivate(ctx context.Context, ident grain.Identity) error {
+	return l.d.deactivate(ctx, cluster.GrainAddress{
+		Location: l.l,
+		Identity: ident,
+	})
+}
+
+func (l *inmemoryGrainDirectoryLock) Lookup(ctx context.Context, ident grain.Identity) (cluster.GrainAddress, error) {
+	return l.d.Lookup(ctx, ident)
+}
+
+func (l *inmemoryGrainDirectoryLock) Unlock(context.Context) error {
+	return nil
+}
+
+func (l *inmemoryGrainDirectoryLock) Err() error {
 	return nil
 }

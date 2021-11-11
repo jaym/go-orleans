@@ -2,11 +2,20 @@
 
 package internal
 
-import ()
+import (
+	"database/sql"
+)
 
 type Grain struct {
 	ID        int64
+	NodeID    int64
 	NodeName  string
 	GrainType string
 	GrainID   string
+}
+
+type Node struct {
+	ID          int64
+	Name        string
+	LastCheckin sql.NullTime
 }

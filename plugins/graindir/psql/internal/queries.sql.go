@@ -5,45 +5,96 @@ package internal
 
 import (
 	"context"
+	"database/sql"
 )
 
 const deleteGrainActivation = `-- name: DeleteGrainActivation :exec
 DELETE FROM grains
     WHERE
-        node_name = $1 AND
+        node_id = $1 AND
         grain_type = COALESCE($2, grain_type) AND
         grain_id = COALESCE($3, grain_id)
 `
 
 type DeleteGrainActivationParams struct {
-	NodeName  string
+	NodeID    int64
 	GrainType string
 	GrainID   string
 }
 
 func (q *Queries) DeleteGrainActivation(ctx context.Context, arg DeleteGrainActivationParams) error {
-	_, err := q.db.Exec(ctx, deleteGrainActivation, arg.NodeName, arg.GrainType, arg.GrainID)
+	_, err := q.db.Exec(ctx, deleteGrainActivation, arg.NodeID, arg.GrainType, arg.GrainID)
+	return err
+}
+
+const deleteNodeByCheckin = `-- name: DeleteNodeByCheckin :exec
+DELETE from nodes
+    WHERE
+        last_checkin < $1
+`
+
+func (q *Queries) DeleteNodeByCheckin(ctx context.Context, lastCheckin sql.NullTime) error {
+	_, err := q.db.Exec(ctx, deleteNodeByCheckin, lastCheckin)
+	return err
+}
+
+const deleteNodeByID = `-- name: DeleteNodeByID :exec
+DELETE from nodes
+    WHERE
+        id = $1
+`
+
+func (q *Queries) DeleteNodeByID(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteNodeByID, id)
+	return err
+}
+
+const deleteNodeByName = `-- name: DeleteNodeByName :exec
+DELETE from nodes
+    WHERE
+        name = $1
+`
+
+func (q *Queries) DeleteNodeByName(ctx context.Context, name string) error {
+	_, err := q.db.Exec(ctx, deleteNodeByName, name)
 	return err
 }
 
 const insertGrain = `-- name: InsertGrain :exec
-INSERT INTO grains (node_name, grain_type, grain_id) 
-    VALUES($1,$2,$3)
+INSERT INTO grains (node_id, node_name, grain_type, grain_id) 
+    VALUES($1,$2,$3,$4)
 `
 
 type InsertGrainParams struct {
+	NodeID    int64
 	NodeName  string
 	GrainType string
 	GrainID   string
 }
 
 func (q *Queries) InsertGrain(ctx context.Context, arg InsertGrainParams) error {
-	_, err := q.db.Exec(ctx, insertGrain, arg.NodeName, arg.GrainType, arg.GrainID)
+	_, err := q.db.Exec(ctx, insertGrain,
+		arg.NodeID,
+		arg.NodeName,
+		arg.GrainType,
+		arg.GrainID,
+	)
 	return err
 }
 
+const insertNode = `-- name: InsertNode :one
+INSERT INTO nodes (name, last_checkin) VALUES($1, NOW()) RETURNING id
+`
+
+func (q *Queries) InsertNode(ctx context.Context, name string) (int64, error) {
+	row := q.db.QueryRow(ctx, insertNode, name)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const lookupGrain = `-- name: LookupGrain :one
-SELECT grains.id, grains.node_name, grains.grain_type, grains.grain_id FROM grains
+SELECT grains.id, grains.node_id, grains.node_name, grains.grain_type, grains.grain_id FROM grains
     WHERE
         grain_type = $1 AND
         grain_id = $2
@@ -59,9 +110,25 @@ func (q *Queries) LookupGrain(ctx context.Context, arg LookupGrainParams) (Grain
 	var i Grain
 	err := row.Scan(
 		&i.ID,
+		&i.NodeID,
 		&i.NodeName,
 		&i.GrainType,
 		&i.GrainID,
 	)
 	return i, err
+}
+
+const updateNodeCheckin = `-- name: UpdateNodeCheckin :execrows
+UPDATE nodes
+    SET last_checkin = NOW()
+WHERE
+    id = $1
+`
+
+func (q *Queries) UpdateNodeCheckin(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, updateNodeCheckin, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

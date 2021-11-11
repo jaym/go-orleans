@@ -7,6 +7,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
+	"github.com/hashicorp/go-multierror"
 
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"
@@ -59,9 +60,14 @@ type TimerTriggerNotification struct {
 type GrainActivationManagerImpl struct {
 	lock                sync.Mutex
 	log                 logr.Logger
+	registrar           descriptor.Registrar
+	siloClient          grain.SiloClient
+	timerService        timer.TimerService
+	observerStore       observer.Store
 	grainActivations    map[grain.Identity]*activation.LocalGrainActivation
 	localGrainActivator *activation.LocalGrainActivator
 	grainDirectory      cluster.GrainDirectory
+	grainDirectoryLock  cluster.GrainDirectoryLock
 	resourceManager     *activation.ResourceManager
 	nodeName            cluster.Location
 	serving             bool
@@ -79,10 +85,13 @@ func NewGrainActivationManager(
 ) *GrainActivationManagerImpl {
 	m := &GrainActivationManagerImpl{
 		log:              log,
+		registrar:        registrar,
+		siloClient:       siloClient,
+		timerService:     timerService,
+		observerStore:    observerStore,
 		nodeName:         nodeName,
 		grainActivations: make(map[grain.Identity]*activation.LocalGrainActivation),
 		grainDirectory:   grainDirectory,
-		serving:          true,
 	}
 	m.resourceManager = activation.NewResourceManager(8, func(identityes []grain.Identity) {
 		for _, a := range identityes {
@@ -91,13 +100,25 @@ func NewGrainActivationManager(
 			})
 		}
 	})
+
+	return m
+}
+
+func (m *GrainActivationManagerImpl) Start(ctx context.Context) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	grainDirLock, err := m.grainDirectory.Lock(ctx, m.nodeName, func() {
+		panic("grain directory lock lost")
+	})
+	if err != nil {
+		return err
+	}
+	m.grainDirectoryLock = grainDirLock
 	deactivateCallback := func(a grain.Identity) {
 		defer m.wg.Done()
-		if err := m.grainDirectory.Deactivate(context.TODO(), cluster.GrainAddress{
-			Location: m.nodeName,
-			Identity: a,
-		}); err != nil {
-			log.Error(err, "failed to deactivate grain", "grain", a)
+		if err := m.grainDirectoryLock.Deactivate(context.TODO(), a); err != nil {
+			m.log.Error(err, "failed to deactivate grain", "grain", a)
 		}
 		m.resourceManager.Remove(a)
 		m.lock.Lock()
@@ -106,17 +127,17 @@ func NewGrainActivationManager(
 	}
 
 	m.localGrainActivator = activation.NewLocalGrainActivator(
-		registrar,
-		siloClient,
-		timerService,
+		m.registrar,
+		m.siloClient,
+		m.timerService,
 		m.resourceManager,
-		observerStore,
+		m.observerStore,
 		deactivateCallback)
-	return m
-}
-
-func (m *GrainActivationManagerImpl) Start() {
 	m.resourceManager.Start()
+	m.timerService.Start()
+	m.serving = true
+
+	return nil
 }
 
 func (m *GrainActivationManagerImpl) EnqueueInvokeMethodRequest(req InvokeMethodRequest) error {
@@ -199,8 +220,19 @@ func (m *GrainActivationManagerImpl) EnqueueEvictGrain(req EvictGrainRequest) er
 }
 
 func (m *GrainActivationManagerImpl) Stop(ctx context.Context) error {
+	var err error
+
+	// TODO: this locking is messy. Figure out what actually should be locked
+	// while trying to stop. Or find an easier way to do this.
 	m.lock.Lock()
 	m.serving = false
+	m.lock.Unlock()
+
+	if errTimer := m.timerService.Stop(ctx); errTimer != nil {
+		err = multierror.Append(err, errTimer)
+	}
+
+	m.lock.Lock()
 	for _, g := range m.grainActivations {
 		if err := g.Stop(); err != nil {
 			m.log.Error(err, "failed to stop grain", "grain", g.Name())
@@ -220,7 +252,12 @@ func (m *GrainActivationManagerImpl) Stop(ctx context.Context) error {
 		return ctx.Err()
 	case <-doneChan:
 	}
-	return nil
+
+	if errUnlock := m.grainDirectoryLock.Unlock(ctx); errUnlock != nil {
+		err = multierror.Append(err, errUnlock)
+	}
+
+	return err
 }
 
 func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allowActivation bool) (*activation.LocalGrainActivation, error) {
@@ -234,9 +271,7 @@ func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allo
 		if allowActivation {
 			var err error
 			// TODO: doing an RPC while holding the lock sucks. Maybe there's a better way to do this
-			if err = m.grainDirectory.Activate(context.TODO(), cluster.GrainAddress{
-				Location: m.nodeName,
-				Identity: receiver}); err != nil {
+			if err = m.grainDirectoryLock.Activate(context.TODO(), receiver); err != nil {
 				return nil, err
 			}
 			m.wg.Add(1)

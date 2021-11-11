@@ -151,7 +151,7 @@ func main() {
 		silo.WithMembership(mp, orlServer),
 		silo.WithGrainDirectory(grainDir))
 	examples.RegisterChirperGrainActivator(s, &ChirperGrainActivatorTestImpl{})
-	if err := s.Start(); err != nil {
+	if err := s.Start(context.Background()); err != nil {
 		panic(err)
 	}
 

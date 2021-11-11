@@ -60,13 +60,19 @@ func TestPsqlStore(t *testing.T) {
 		grain1 := grainIdent("tester1", "grain1")
 		grain2 := grainIdent("tester2", "grain2")
 
-		_, err := store.Lookup(ctx, grain1)
-		require.Equal(t, err, cluster.ErrGrainActivationNotFound)
-
-		err = store.Activate(ctx, grainAddr(node1, grain1))
+		node1Lock, err := store.Lock(ctx, cluster.Location(node1), func() {})
 		require.NoError(t, err)
 
-		err = store.Activate(ctx, grainAddr(node1, grain2))
+		node2Lock, err := store.Lock(ctx, cluster.Location(node2), func() {})
+		require.NoError(t, err)
+
+		_, err = store.Lookup(ctx, grain1)
+		require.Equal(t, err, cluster.ErrGrainActivationNotFound)
+
+		err = node1Lock.Activate(ctx, grain1)
+		require.NoError(t, err)
+
+		err = node1Lock.Activate(ctx, grain2)
 		require.NoError(t, err)
 
 		g1, err := store.Lookup(ctx, grain1)
@@ -77,17 +83,22 @@ func TestPsqlStore(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, grainAddr(node1, grain2), g2)
 
-		err = store.Deactivate(ctx, grainAddr(node1, grain2))
+		err = node1Lock.Deactivate(ctx, grain2)
 		require.NoError(t, err)
 		_, err = store.Lookup(ctx, grain2)
 		require.Equal(t, err, cluster.ErrGrainActivationNotFound)
 
 		// shouldn't do anything because location does not match
-		err = store.Deactivate(ctx, grainAddr(node2, grain1))
+		err = node2Lock.Deactivate(ctx, grain1)
 		require.NoError(t, err)
 		g1, err = store.Lookup(ctx, grain1)
 		require.NoError(t, err)
 		require.Equal(t, grainAddr(node1, grain1), g1)
+
+		err = node1Lock.Unlock(ctx)
+		require.NoError(t, err)
+		_, err = store.Lookup(ctx, grain1)
+		require.Equal(t, err, cluster.ErrGrainActivationNotFound)
 	})
 
 }
