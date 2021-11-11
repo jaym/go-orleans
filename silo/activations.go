@@ -64,6 +64,8 @@ type GrainActivationManagerImpl struct {
 	grainDirectory      cluster.GrainDirectory
 	resourceManager     *activation.ResourceManager
 	nodeName            cluster.Location
+	serving             bool
+	wg                  sync.WaitGroup
 }
 
 func NewGrainActivationManager(
@@ -80,6 +82,7 @@ func NewGrainActivationManager(
 		nodeName:         nodeName,
 		grainActivations: make(map[grain.Identity]*activation.LocalGrainActivation),
 		grainDirectory:   grainDirectory,
+		serving:          true,
 	}
 	m.resourceManager = activation.NewResourceManager(8, func(identityes []grain.Identity) {
 		for _, a := range identityes {
@@ -89,6 +92,7 @@ func NewGrainActivationManager(
 		}
 	})
 	deactivateCallback := func(a grain.Identity) {
+		defer m.wg.Done()
 		if err := m.grainDirectory.Deactivate(context.TODO(), cluster.GrainAddress{
 			Location: m.nodeName,
 			Identity: a,
@@ -194,9 +198,37 @@ func (m *GrainActivationManagerImpl) EnqueueEvictGrain(req EvictGrainRequest) er
 	return activation.Evict()
 }
 
+func (m *GrainActivationManagerImpl) Stop(ctx context.Context) error {
+	m.lock.Lock()
+	m.serving = false
+	for _, g := range m.grainActivations {
+		if err := g.Stop(); err != nil {
+			m.log.Error(err, "failed to stop grain", "grain", g.Name())
+		}
+	}
+	m.lock.Unlock()
+
+	// TODO: find a better pattern. In the error case, this leaks
+	// a goroutine that will forever wait and potentially hide a bug
+	doneChan := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(doneChan)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-doneChan:
+	}
+	return nil
+}
+
 func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allowActivation bool) (*activation.LocalGrainActivation, error) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
+	if !m.serving {
+		return nil, ErrUnavailable
+	}
 	a, ok := m.grainActivations[receiver]
 	if !ok {
 		if allowActivation {
@@ -207,8 +239,10 @@ func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allo
 				Identity: receiver}); err != nil {
 				return nil, err
 			}
+			m.wg.Add(1)
 			a, err = m.localGrainActivator.ActivateGrainWithDefaultActivator(receiver)
 			if err != nil {
+				m.wg.Done()
 				return nil, err
 			}
 			m.grainActivations[receiver] = a
@@ -221,3 +255,4 @@ func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allo
 
 var ErrInboxFull = errors.New("inbox full")
 var ErrGrainActivationNotFound = errors.New("grain activation not found")
+var ErrUnavailable = errors.New("unavailable")

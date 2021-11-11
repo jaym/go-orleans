@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/go-logr/logr"
+	"github.com/hashicorp/go-multierror"
 	"github.com/segmentio/ksuid"
 
 	"github.com/jaym/go-orleans/grain"
@@ -157,4 +158,28 @@ func (s *Silo) CreateGrain(activator GenericGrainActivator) (grain.Identity, err
 		Activator: activator,
 	})
 	return identity, err
+}
+
+func (s *Silo) Stop(ctx context.Context) error {
+	var err error
+
+	// Stop discovering nodes. We're trying to leave the cluster so
+	// finding more nodes is not worthwhile
+	if errDiscovery := s.discovery.Stop(ctx); errDiscovery != nil {
+		err = multierror.Append(err, errDiscovery)
+	}
+
+	// TODO: Set silo state to stopping. This is so other nodes don't
+	// consider placing grains in this silo while its being shut down
+
+	// Stop grain manager
+	if errGrainDir := s.localGrainManager.Stop(ctx); errGrainDir != nil {
+		err = multierror.Append(err, errGrainDir)
+	}
+
+	// TODO: stop grain directory
+	if errLeave := s.membershipProtocol.Leave(ctx); errLeave != nil {
+		err = multierror.Append(err, errLeave)
+	}
+	return err
 }

@@ -34,6 +34,14 @@ func NewGrainDirectory(log logr.Logger, db *pgxpool.Pool) *PSQLStore {
 	}
 }
 
+func (*PSQLStore) Start(context.Context) error {
+	return nil
+}
+
+func (*PSQLStore) Stop(context.Context) error {
+	return nil
+}
+
 func (m *PSQLStore) Lookup(ctx context.Context, ident grain.Identity) (cluster.GrainAddress, error) {
 	g, err := m.q.LookupGrain(ctx, internal.LookupGrainParams{
 		GrainType: ident.GrainType,

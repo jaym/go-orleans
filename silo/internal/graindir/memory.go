@@ -21,6 +21,14 @@ func NewInmemoryGrainDirectory(local cluster.Location) *InmemoryGrainDirectory {
 	}
 }
 
+func (m *InmemoryGrainDirectory) Start(context.Context) error {
+	return nil
+}
+
+func (m *InmemoryGrainDirectory) Stop(context.Context) error {
+	return nil
+}
+
 func (m *InmemoryGrainDirectory) Lookup(ctx context.Context, ident grain.Identity) (cluster.GrainAddress, error) {
 	m.lock.RLock()
 	defer m.lock.RUnlock()

@@ -57,6 +57,7 @@ type grainActivationMessage struct {
 }
 
 type grainActivationEvict struct {
+	mustStop bool
 }
 
 type LocalGrainActivation struct {
@@ -183,16 +184,16 @@ func (l *LocalGrainActivation) loop(ctx context.Context) {
 LOOP:
 	for {
 		select {
-		case <-l.evictChan:
-			if l.evict(ctx, activation, false) {
+		case req := <-l.evictChan:
+			if l.evict(ctx, activation, req.mustStop) {
 				break LOOP
 			}
 		default:
 		}
 
 		select {
-		case <-l.evictChan:
-			if l.evict(ctx, activation, false) {
+		case req := <-l.evictChan:
+			if l.evict(ctx, activation, req.mustStop) {
 				break LOOP
 			}
 		case msg := <-l.inbox:
@@ -315,6 +316,21 @@ func (l *LocalGrainActivation) Evict() error {
 		return ErrInboxFull
 	}
 	return nil
+}
+
+func (l *LocalGrainActivation) Stop() error {
+	select {
+	case l.evictChan <- grainActivationEvict{
+		mustStop: true,
+	}:
+	default:
+		return ErrInboxFull
+	}
+	return nil
+}
+
+func (l *LocalGrainActivation) Name() string {
+	return l.identity.String()
 }
 
 func (l *LocalGrainActivation) pushInbox(msg grainActivationMessage) error {

@@ -45,6 +45,7 @@ func New(log logr.Logger, nodeName cluster.Location, membershipPort int, rpcPort
 		log:            log,
 		nodeName:       nodeName,
 		membershipPort: membershipPort,
+		closeChan:      make(chan struct{}),
 		nodeMetadata: &nodeMetadata{
 			RPCPort: rpcPort,
 		},

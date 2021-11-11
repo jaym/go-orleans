@@ -187,4 +187,10 @@ func main() {
 	}(log.WithName("clienter"), s.Client())
 
 	<-stop
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := s.Stop(ctx); err != nil {
+		panic(err)
+	}
 }
