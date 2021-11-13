@@ -137,7 +137,12 @@ func (s *TransportServer) createTransport(n node) *transport {
 	if tp, ok := s.transports[n.name]; ok {
 		return tp
 	}
-	tp := newTransport(s.log, s.thisNode, n)
+	nodeName := n.name
+	tp := newTransport(s.log, s.thisNode, n, func() {
+		s.lock.Lock()
+		defer s.lock.Unlock()
+		delete(s.transports, nodeName)
+	})
 	s.transports[n.name] = tp
 	return tp
 }
@@ -152,9 +157,10 @@ type transport struct {
 	outbox    chan *internal.TransportMessage
 	closeChan chan struct{}
 	wg        sync.WaitGroup
+	onStop    func()
 }
 
-func newTransport(log logr.Logger, thisNode node, dstNode node) *transport {
+func newTransport(log logr.Logger, thisNode node, dstNode node, onStop func()) *transport {
 	return &transport{
 		log:       log.WithName("transport").WithValues("node", dstNode.name, "ip", dstNode.ip, "port", dstNode.port),
 		thisNode:  thisNode,
@@ -162,6 +168,7 @@ func newTransport(log logr.Logger, thisNode node, dstNode node) *transport {
 		inbox:     make(chan *internal.TransportMessage, 128),
 		outbox:    make(chan *internal.TransportMessage, 128),
 		closeChan: make(chan struct{}),
+		onStop:    onStop,
 	}
 }
 
@@ -349,6 +356,7 @@ func internalGrainIdent(id grain.Identity) *internal.GrainIdentity {
 }
 
 func (t *transport) Stop() error {
+	t.onStop()
 	close(t.closeChan)
 	t.wg.Wait()
 	return nil
