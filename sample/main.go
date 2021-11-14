@@ -14,7 +14,6 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/stdr"
 	_ "github.com/jackc/pgx/v4/stdlib"
-	gcontext "github.com/jaym/go-orleans/context"
 	examples "github.com/jaym/go-orleans/examples/proto"
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/plugins/codec/protobuf"
@@ -163,7 +162,7 @@ func main() {
 
 	go func(log logr.Logger, client grain.SiloClient) {
 		time.Sleep(2 * time.Second)
-		ctx := gcontext.WithIdentityContext(context.Background(), grain.Identity{})
+		ctx := context.Background()
 		for {
 			i := rand.Intn(64)
 			gident := grain.Identity{

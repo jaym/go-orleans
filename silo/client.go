@@ -50,9 +50,8 @@ func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver grain.Identi
 
 	sender := gcontext.IdentityFromContext(ctx)
 	if sender == nil {
-		log.Info("no sender in context")
-		// TODO: generate anonymous identity
-		panic("no sender")
+		g := grain.Anonymous()
+		sender = &g
 	}
 	bytes, err := proto.Marshal(in)
 	if err != nil {

@@ -39,3 +39,9 @@ func (a *Identity) UnmarshalText(text []byte) error {
 	}
 	return nil
 }
+
+func Anonymous() Identity {
+	return Identity{
+		GrainType: "_anonymous_",
+	}
+}
