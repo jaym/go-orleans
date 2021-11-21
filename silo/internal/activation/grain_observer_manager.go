@@ -55,6 +55,9 @@ func newGrainObserverManager(owner grain.Identity, store observer.Store, siloCli
 }
 
 func (m *grainObserverManager) ensureLoaded(ctx context.Context) error {
+	if m.loaded {
+		return nil
+	}
 	observers, err := m.store.List(ctx, m.owner, "")
 	if err != nil {
 		return err
@@ -105,6 +108,39 @@ func (m *grainObserverManager) Add(ctx context.Context, observableName string, i
 	m.registeredObservers[observableName] = append(m.registeredObservers[observableName], o)
 
 	return o, nil
+}
+
+func (m *grainObserverManager) Remove(ctx context.Context, observableName string, identity grain.Identity) error {
+	if err := m.ensureLoaded(ctx); err != nil {
+		return err
+	}
+	observersForObservable, ok := m.registeredObservers[observableName]
+	if !ok {
+		return nil
+	}
+
+	idx := -1
+	for i, o := range observersForObservable {
+		if o.GetIdentity() == identity {
+			idx = i
+			break
+		}
+	}
+
+	if idx == -1 {
+		return nil
+	}
+
+	if err := m.store.Remove(ctx, m.owner, observer.RemoveByObserverGrain(identity)); err != nil {
+		return err
+	}
+
+	if idx >= 0 {
+		lastIdx := len(observersForObservable)
+		observersForObservable[idx] = observersForObservable[lastIdx]
+		m.registeredObservers[observableName] = observersForObservable[:lastIdx]
+	}
+	return nil
 }
 
 func (m *grainObserverManager) Notify(ctx context.Context, observableName string, observers []grain.RegisteredObserver, val proto.Message) error {

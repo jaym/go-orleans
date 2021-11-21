@@ -61,6 +61,7 @@ func writeGrainInterface(g *protogen.GeneratedFile, svc *protogen.Service) {
 	for _, m := range svc.Methods {
 		if isObservable(m) {
 			g.P(grainInterfaceRegisterObserverSignature(g, m))
+			g.P(grainInterfaceUnsubscribeObserverSignature(g, m))
 		} else {
 			g.P(grainInterfaceMethodSignature(g, m))
 		}
@@ -82,6 +83,21 @@ func grainInterfaceRegisterObserverSignature(g *protogen.GeneratedFile, m *proto
 	builder.WriteString(", ")
 	builder.WriteString("req *")
 	builder.WriteString(g.QualifiedGoIdent(m.Input.GoIdent))
+	builder.WriteString(") ")
+	builder.WriteString("error")
+	return builder.String()
+}
+
+func grainInterfaceUnsubscribeObserverSignature(g *protogen.GeneratedFile, m *protogen.Method) string {
+	builder := strings.Builder{}
+	builder.WriteString("Unsubscribe")
+	builder.WriteString(m.GoName)
+	builder.WriteString("Observer(")
+	builder.WriteString("ctx ")
+	builder.WriteString(g.QualifiedGoIdent(contextType))
+	builder.WriteString(", ")
+	builder.WriteString("observer ")
+	builder.WriteString(g.QualifiedGoIdent(identityType))
 	builder.WriteString(") ")
 	builder.WriteString("error")
 	return builder.String()
@@ -213,6 +229,7 @@ func writeGrainRefInterface(g *protogen.GeneratedFile, svc *protogen.Service) {
 	for _, m := range svc.Methods {
 		if isObservable(m) {
 			g.P(grainRefInterfaceObserverSignature(g, m))
+			g.P(grainRefInterfaceUnsubscribeObserverSignature(g, m))
 		} else {
 			g.P(grainInterfaceMethodSignature(g, m))
 		}
@@ -247,6 +264,20 @@ func grainRefInterfaceObserverSignature(g *protogen.GeneratedFile, m *protogen.M
 	return builder.String()
 }
 
+func grainRefInterfaceUnsubscribeObserverSignature(g *protogen.GeneratedFile, m *protogen.Method) string {
+	builder := strings.Builder{}
+	builder.WriteString("Unsubscribe")
+	builder.WriteString(m.GoName)
+	builder.WriteString("(")
+	builder.WriteString("ctx ")
+	builder.WriteString(g.QualifiedGoIdent(contextType))
+	builder.WriteString(", ")
+	builder.WriteString("observer ")
+	builder.WriteString(g.QualifiedGoIdent(grainRefType))
+	builder.WriteString(") error")
+	return builder.String()
+}
+
 func generateGrainServices(g *protogen.GeneratedFile, svc *protogen.Service) {
 	writeGrainServicesInterface(g, svc)
 	writeGrainServicesImplementation(g, svc)
@@ -273,6 +304,11 @@ func writeGrainServicesInterface(g *protogen.GeneratedFile, svc *protogen.Servic
 				"ctx ", g.QualifiedGoIdent(contextType), ",",
 				"observer ", g.QualifiedGoIdent(identityType), ",",
 				"req *", g.QualifiedGoIdent(m.Input.GoIdent), ",",
+				") error",
+			)
+			g.P("Remove", m.GoName, "Observer(",
+				"ctx ", g.QualifiedGoIdent(contextType), ",",
+				"observer ", g.QualifiedGoIdent(identityType), ",",
 				") error",
 			)
 		}
@@ -332,6 +368,18 @@ func writeGrainServicesImplementation(g *protogen.GeneratedFile, svc *protogen.S
 			g.P("return err")
 			g.P("}")
 			g.P()
+			g.P("func (m *", "impl_", svc.GoName, "GrainServices) Remove", m.GoName, "Observer(",
+				"ctx ", g.QualifiedGoIdent(contextType), ",",
+				"observer ", g.QualifiedGoIdent(identityType), ",",
+				") error {",
+			)
+			g.P("return m.observerManager.Remove(",
+				"ctx,",
+				"ChirperGrain_GrainDesc.Observables[", observerIdx, "].Name,",
+				"observer)",
+			)
+			g.P("}")
+			g.P()
 
 			observerIdx++
 		}
@@ -367,6 +415,7 @@ func generateGrainHandlers(g *protogen.GeneratedFile, svc *protogen.Service) {
 		if isObservable(m) {
 			writeObserverHandler(g, m)
 			writeRegisterObserverHandler(g, m)
+			writeUnsubscribeObserverHandler(g, m)
 		} else {
 			writeMethodHandler(g, m)
 		}
@@ -411,13 +460,23 @@ func observerHandlerName(m *protogen.Method) string {
 	return builder.String()
 }
 
-func registeObserverHandlerName(m *protogen.Method) string {
+func registerObserverHandlerName(m *protogen.Method) string {
 	builder := strings.Builder{}
 	builder.WriteRune('_')
 	builder.WriteString(m.Parent.GoName)
 	builder.WriteString("Grain_")
 	builder.WriteString(m.GoName)
 	builder.WriteString("_RegisterObserverHandler")
+	return builder.String()
+}
+
+func unsubscribeObserverHandlerName(m *protogen.Method) string {
+	builder := strings.Builder{}
+	builder.WriteRune('_')
+	builder.WriteString(m.Parent.GoName)
+	builder.WriteString("Grain_")
+	builder.WriteString(m.GoName)
+	builder.WriteString("_UnsubscribeObserverHandler")
 	return builder.String()
 }
 
@@ -439,7 +498,7 @@ func writeObserverHandler(g *protogen.GeneratedFile, m *protogen.Method) {
 }
 
 func writeRegisterObserverHandler(g *protogen.GeneratedFile, m *protogen.Method) {
-	g.P("func ", registeObserverHandlerName(m), "(",
+	g.P("func ", registerObserverHandlerName(m), "(",
 		"srv interface{},",
 		"ctx ", g.QualifiedGoIdent(contextType), ", ",
 		"observer ", g.QualifiedGoIdent(identityType), ", ",
@@ -452,6 +511,18 @@ func writeRegisterObserverHandler(g *protogen.GeneratedFile, m *protogen.Method)
 	g.P("}")
 	g.P()
 	g.P("return srv.(", m.Parent.GoName, "Grain).Register", m.GoName, "Observer(ctx, observer, in)")
+
+	g.P("}")
+}
+
+func writeUnsubscribeObserverHandler(g *protogen.GeneratedFile, m *protogen.Method) {
+	g.P("func ", unsubscribeObserverHandlerName(m), "(",
+		"srv interface{},",
+		"ctx ", g.QualifiedGoIdent(contextType), ", ",
+		"observer ", g.QualifiedGoIdent(identityType), ", ",
+		") error {",
+	)
+	g.P("return srv.(", m.Parent.GoName, "Grain).Unsubscribe", m.GoName, "Observer(ctx, observer)")
 
 	g.P("}")
 }
@@ -523,7 +594,8 @@ func writeObservableDesc(g *protogen.GeneratedFile, m *protogen.Method) {
 	g.P("{")
 	g.P("Name: \"", m.GoName, "\",")
 	g.P("Handler: ", observerHandlerName(m), ",")
-	g.P("RegisterHandler: ", registeObserverHandlerName(m), ",")
+	g.P("RegisterHandler: ", registerObserverHandlerName(m), ",")
+	g.P("UnsubscribeHandler: ", unsubscribeObserverHandlerName(m), ",")
 	g.P("},")
 }
 
@@ -559,6 +631,7 @@ func generateGrainClient(g *protogen.GeneratedFile, svc *protogen.Service) {
 	for _, m := range svc.Methods {
 		if isObservable(m) {
 			writeGrainClientRegisterObserver(g, observableIdx, m)
+			writeGrainClientUnsubscribeObserver(g, observableIdx, m)
 			observableIdx++
 		} else {
 			writeGrainClientMethod(g, methodIdx, m)
@@ -587,9 +660,23 @@ func writeGrainClientMethod(g *protogen.GeneratedFile, methodIdx int, m *protoge
 }
 
 func writeGrainClientRegisterObserver(g *protogen.GeneratedFile, observableIdx int, m *protogen.Method) {
-	//grainRefInterfaceObserverSignature
 	g.P("func (c *", clientName(m.Parent), ") ", grainRefInterfaceObserverSignature(g, m), "{")
-	g.P("f := c.siloClient.RegisterObserver(ctx, observer.GetIdentity(), c.GetIdentity(), ", m.Parent.GoName, "Grain_GrainDesc.Observables[0].Name, req)")
+	g.P("f := c.siloClient.RegisterObserver(ctx, observer.GetIdentity(), c.GetIdentity(), ", m.Parent.GoName, "Grain_GrainDesc.Observables[", observableIdx, "].Name, req)")
+
+	g.P("err := f.Await(ctx)")
+	g.P("if err != nil {")
+	g.P("return err")
+	g.P("}")
+
+	g.P("return nil")
+
+	g.P("}")
+
+}
+
+func writeGrainClientUnsubscribeObserver(g *protogen.GeneratedFile, observableIdx int, m *protogen.Method) {
+	g.P("func (c *", clientName(m.Parent), ") ", grainRefInterfaceUnsubscribeObserverSignature(g, m), "{")
+	g.P("f := c.siloClient.UnsubscribeObserver(ctx, observer.GetIdentity(), c.GetIdentity(), ", m.Parent.GoName, "Grain_GrainDesc.Observables[", observableIdx, "].Name)")
 
 	g.P("err := f.Await(ctx)")
 	g.P("if err != nil {")

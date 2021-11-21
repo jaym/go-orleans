@@ -97,6 +97,27 @@ func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer grain.Id
 	return newRegisterObserverFuture(s.codec, f)
 }
 
+func (s *siloClientImpl) UnsubscribeObserver(ctx context.Context, observer grain.Identity, observable grain.Identity,
+	name string) grain.UnsubscribeObserverFuture {
+
+	id := ksuid.New().String()
+
+	log := s.log.WithValues("uuid", id, "observer", observer, "observable", observable, "observableName", name)
+	log.V(4).Info("RegisterObserver")
+
+	addr, err := s.getGrainAddress(ctx, observable)
+	if err != nil {
+		return registerObserverFailedFuture{err: err}
+	}
+
+	f, err := s.transportManager.UnsubscribeObserver(ctx, observer, addr, name, id)
+	if err != nil {
+		return registerObserverFailedFuture{err: err}
+	}
+
+	return newRegisterObserverFuture(s.codec, f)
+}
+
 func (s *siloClientImpl) NotifyObservers(ctx context.Context, observableType string, observableName string,
 	receivers []grain.Identity, out proto.Message) error {
 

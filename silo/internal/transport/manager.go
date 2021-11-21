@@ -34,6 +34,7 @@ type TransportHandler interface {
 	ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, payload []byte, promise InvokeMethodPromise)
 	ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, payload []byte, promise RegisterObserverPromise)
 	ReceiveObserverNotification(ctx context.Context, sender grain.Identity, receivers []grain.Identity, observableType string, name string, payload []byte)
+	ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, promise UnsubscribeObserverPromise)
 }
 
 type InvokeMethodPromise interface {
@@ -80,11 +81,11 @@ type RegisterObserverFuture interface {
 	Await(ctx context.Context) (errData []byte, err error)
 }
 
-type registerObserverFuncPromise struct {
+type observerFuncPromise struct {
 	f func(err []byte)
 }
 
-func (p registerObserverFuncPromise) Resolve(errData []byte) {
+func (p observerFuncPromise) Resolve(errData []byte) {
 	if len(errData) > 0 {
 		p.f(errData)
 	} else {
@@ -92,13 +93,13 @@ func (p registerObserverFuncPromise) Resolve(errData []byte) {
 	}
 }
 
-type registerObserverChanFuture struct {
+type observerChanFuture struct {
 	c chan struct {
 		errData []byte
 	}
 }
 
-func (f registerObserverChanFuture) Await(ctx context.Context) ([]byte, error) {
+func (f observerChanFuture) Await(ctx context.Context) ([]byte, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -107,17 +108,26 @@ func (f registerObserverChanFuture) Await(ctx context.Context) ([]byte, error) {
 	}
 }
 
+type UnsubscribeObserverPromise interface {
+	Resolve(errData []byte)
+}
+
+type UnsubscribeObserverFuture interface {
+	Await(ctx context.Context) (errData []byte, err error)
+}
+
 type managedTransport struct {
 	internal *managedTransportInternal
 }
 
 type managedTransportInternal struct {
 	TransportHandler
-	log                      logr.Logger
-	transport                cluster.Transport
-	lock                     sync.Mutex
-	invokeMethodPromises     map[string]InvokeMethodPromise
-	registerObserverPromises map[string]RegisterObserverPromise
+	log                         logr.Logger
+	transport                   cluster.Transport
+	lock                        sync.Mutex
+	invokeMethodPromises        map[string]InvokeMethodPromise
+	registerObserverPromises    map[string]RegisterObserverPromise
+	unsubscribeObserverPromises map[string]UnsubscribeObserverPromise
 }
 
 func (h *managedTransportInternal) stop() error {
@@ -126,12 +136,12 @@ func (h *managedTransportInternal) stop() error {
 }
 
 func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string) RegisterObserverFuture {
-	f := registerObserverChanFuture{
+	f := observerChanFuture{
 		c: make(chan struct {
 			errData []byte
 		}, 1),
 	}
-	p := registerObserverFuncPromise{
+	p := observerFuncPromise{
 		f: func(errData []byte) {
 			f.c <- struct{ errData []byte }{errData: errData}
 		},
@@ -139,6 +149,23 @@ func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string) 
 	h.lock.Lock()
 	defer h.lock.Unlock()
 	h.registerObserverPromises[uuid] = p
+	return f
+}
+
+func (h *managedTransportInternal) registerUnsubscribeObserverPromise(uuid string) RegisterObserverFuture {
+	f := observerChanFuture{
+		c: make(chan struct {
+			errData []byte
+		}, 1),
+	}
+	p := observerFuncPromise{
+		f: func(errData []byte) {
+			f.c <- struct{ errData []byte }{errData: errData}
+		},
+	}
+	h.lock.Lock()
+	defer h.lock.Unlock()
+	h.unsubscribeObserverPromises[uuid] = p
 	return f
 }
 
@@ -203,7 +230,7 @@ func (h *managedTransportInternal) ReceiveInvokeMethodRequest(ctx context.Contex
 }
 
 func (h *managedTransportInternal) ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte) {
-	p := registerObserverFuncPromise{f: func(errOut []byte) {
+	p := observerFuncPromise{f: func(errOut []byte) {
 		if err := h.transport.EnqueueAckRegisterObserver(context.TODO(), observer, uuid, errOut); err != nil {
 			h.log.V(0).Error(err, "failed to response to ack observer registration",
 				"observer", observer,
@@ -213,6 +240,32 @@ func (h *managedTransportInternal) ReceiveRegisterObserverRequest(ctx context.Co
 		}
 	}}
 	h.TransportHandler.ReceiveRegisterObserverRequest(ctx, observer, observable, name, payload, p)
+}
+
+func (h *managedTransportInternal) ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string) {
+	p := observerFuncPromise{f: func(errOut []byte) {
+		if err := h.transport.EnqueueAckUnsubscribeObserver(context.TODO(), observer, uuid, errOut); err != nil {
+			h.log.V(0).Error(err, "failed to response to ack unsubscribe observer",
+				"observer", observer,
+				"observable", observable,
+				"name", name,
+				"uuid", uuid)
+		}
+	}}
+	h.TransportHandler.ReceiveUnsubscribeObserverRequest(ctx, observer, observable, name, p)
+}
+
+func (h *managedTransportInternal) ReceiveAckUnsubscribeObserver(ctx context.Context, receiver grain.Identity, uuid string, errData []byte) {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	p, ok := h.unsubscribeObserverPromises[uuid]
+	if !ok {
+		h.log.V(1).Info("promise not found", "handler", "ack-register-observer", "receiver", receiver, "uuid", uuid)
+		return
+	}
+	p.Resolve(errData)
+	delete(h.invokeMethodPromises, uuid)
 }
 
 func (m *Manager) AddTransport(nodeName cluster.Location, creator func() (cluster.Transport, error)) error {
@@ -230,11 +283,12 @@ func (m *Manager) AddTransport(nodeName cluster.Location, creator func() (cluste
 
 	mt := &managedTransport{
 		internal: &managedTransportInternal{
-			log:                      m.log.WithName(string(nodeName)),
-			transport:                transport,
-			TransportHandler:         m.handler,
-			invokeMethodPromises:     make(map[string]InvokeMethodPromise),
-			registerObserverPromises: make(map[string]RegisterObserverPromise),
+			log:                         m.log.WithName(string(nodeName)),
+			transport:                   transport,
+			TransportHandler:            m.handler,
+			invokeMethodPromises:        make(map[string]InvokeMethodPromise),
+			registerObserverPromises:    make(map[string]RegisterObserverPromise),
+			unsubscribeObserverPromises: make(map[string]UnsubscribeObserverPromise),
 		},
 	}
 	m.transports[nodeName] = mt
@@ -287,6 +341,20 @@ func (m *Manager) RegisterObserver(ctx context.Context, observer grain.Identity,
 
 	f := t.internal.registerRegisterObserverPromise(uuid)
 	if err := t.internal.transport.EnqueueRegisterObserverRequest(ctx, observer, observable.Identity, name, uuid, payload); err != nil {
+		// TODO: if an error is returned, its possible that we never resolved the promise
+		return nil, err
+	}
+	return f, nil
+}
+
+func (m *Manager) UnsubscribeObserver(ctx context.Context, observer grain.Identity, observable cluster.GrainAddress, name string, uuid string) (UnsubscribeObserverFuture, error) {
+	t, err := m.getTransport(observable.Location)
+	if err != nil {
+		return nil, err
+	}
+
+	f := t.internal.registerUnsubscribeObserverPromise(uuid)
+	if err := t.internal.transport.EnqueueUnsubscribeObserverRequest(ctx, observer, observable.Identity, name, uuid); err != nil {
 		// TODO: if an error is returned, its possible that we never resolved the promise
 		return nil, err
 	}

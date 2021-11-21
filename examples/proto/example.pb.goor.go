@@ -14,6 +14,7 @@ type ChirperGrainServices interface {
 	NotifyMessageObservers(ctx context.Context, observers []grain.RegisteredObserver, val *ChirpMessage) error
 	ListMessageObservers(ctx context.Context) ([]grain.RegisteredObserver, error)
 	AddMessageObserver(ctx context.Context, observer grain.Identity, req *SubscribeRequest) error
+	RemoveMessageObserver(ctx context.Context, observer grain.Identity) error
 }
 
 type impl_ChirperGrainServices struct {
@@ -38,6 +39,10 @@ func (m *impl_ChirperGrainServices) AddMessageObserver(ctx context.Context, obse
 	return err
 }
 
+func (m *impl_ChirperGrainServices) RemoveMessageObserver(ctx context.Context, observer grain.Identity) error {
+	return m.observerManager.Remove(ctx, ChirperGrain_GrainDesc.Observables[0].Name, observer)
+}
+
 type ChirperGrainActivator interface {
 	Activate(ctx context.Context, identity grain.Identity, services ChirperGrainServices) (ChirperGrain, error)
 }
@@ -50,6 +55,7 @@ type ChirperGrain interface {
 	grain.GrainReference
 	PublishMessage(ctx context.Context, req *PublishMessageRequest) (*PublishMessageResponse, error)
 	RegisterMessageObserver(ctx context.Context, observer grain.Identity, req *SubscribeRequest) error
+	UnsubscribeMessageObserver(ctx context.Context, observer grain.Identity) error
 }
 
 type ChirperGrainMessageObserver interface {
@@ -91,6 +97,7 @@ type ChirperGrainRef interface {
 	grain.GrainReference
 	PublishMessage(ctx context.Context, req *PublishMessageRequest) (*PublishMessageResponse, error)
 	ObserveMessage(ctx context.Context, observer grain.GrainReference, req *SubscribeRequest) error
+	UnsubscribeMessage(ctx context.Context, observer grain.GrainReference) error
 }
 
 var ChirperGrain_GrainDesc = descriptor.GrainDescription{
@@ -106,9 +113,10 @@ var ChirperGrain_GrainDesc = descriptor.GrainDescription{
 	},
 	Observables: []descriptor.ObservableDesc{
 		{
-			Name:            "Message",
-			Handler:         _ChirperGrain_Message_ObserverHandler,
-			RegisterHandler: _ChirperGrain_Message_RegisterObserverHandler,
+			Name:               "Message",
+			Handler:            _ChirperGrain_Message_ObserverHandler,
+			RegisterHandler:    _ChirperGrain_Message_RegisterObserverHandler,
+			UnsubscribeHandler: _ChirperGrain_Message_UnsubscribeObserverHandler,
 		},
 	},
 }
@@ -146,6 +154,9 @@ func _ChirperGrain_Message_RegisterObserverHandler(srv interface{}, ctx context.
 
 	return srv.(ChirperGrain).RegisterMessageObserver(ctx, observer, in)
 }
+func _ChirperGrain_Message_UnsubscribeObserverHandler(srv interface{}, ctx context.Context, observer grain.Identity) error {
+	return srv.(ChirperGrain).UnsubscribeMessageObserver(ctx, observer)
+}
 
 type _grainClient_ChirperGrain struct {
 	grain.Identity
@@ -173,6 +184,14 @@ func (c *_grainClient_ChirperGrain) PublishMessage(ctx context.Context, req *Pub
 }
 func (c *_grainClient_ChirperGrain) ObserveMessage(ctx context.Context, observer grain.GrainReference, req *SubscribeRequest) error {
 	f := c.siloClient.RegisterObserver(ctx, observer.GetIdentity(), c.GetIdentity(), ChirperGrain_GrainDesc.Observables[0].Name, req)
+	err := f.Await(ctx)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+func (c *_grainClient_ChirperGrain) UnsubscribeMessage(ctx context.Context, observer grain.GrainReference) error {
+	f := c.siloClient.UnsubscribeObserver(ctx, observer.GetIdentity(), c.GetIdentity(), ChirperGrain_GrainDesc.Observables[0].Name)
 	err := f.Await(ctx)
 	if err != nil {
 		return err

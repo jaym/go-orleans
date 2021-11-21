@@ -43,6 +43,14 @@ type RegisterObserverRequest struct {
 	ResolveFunc func(error)
 }
 
+type UnsubscribeObserverRequest struct {
+	Observer    grain.Identity
+	Observable  grain.Identity
+	Name        string
+	UUID        string
+	ResolveFunc func(error)
+}
+
 type ObserverNotification struct {
 	Sender         grain.Identity
 	Receivers      []grain.Identity
@@ -156,6 +164,15 @@ func (m *GrainActivationManagerImpl) EnqueueRegisterObserverRequest(req Register
 	}
 
 	return activation.RegisterObserver(req.Observer, req.Name, req.In, req.ResolveFunc)
+}
+
+func (m *GrainActivationManagerImpl) EnqueueUnsubscribeObserverRequest(req UnsubscribeObserverRequest) error {
+	activation, err := m.getActivation(req.Observable, true)
+	if err != nil {
+		return err
+	}
+
+	return activation.UnsubscribeObserver(req.Observer, req.Name, req.ResolveFunc)
 }
 
 func (m *GrainActivationManagerImpl) EnqueueObserverNotification(req ObserverNotification) error {

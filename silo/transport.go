@@ -84,6 +84,25 @@ func (s siloTransportHandler) ReceiveObserverNotification(ctx context.Context, s
 	}
 }
 
+func (s siloTransportHandler) ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, promise transport.UnsubscribeObserverPromise) {
+	err := s.localGrainManager.EnqueueUnsubscribeObserverRequest(UnsubscribeObserverRequest{
+		Observer:   observer,
+		Observable: observable,
+		Name:       name,
+		ResolveFunc: func(e error) {
+			if e != nil {
+				promise.Resolve(encodeError(ctx, e))
+			} else {
+				promise.Resolve(nil)
+			}
+		},
+	})
+	if err != nil {
+		promise.Resolve(encodeError(ctx, err))
+		s.log.Error(err, "failed to enqueue register observer", "observer", observer, "observable", observable, "name", name)
+	}
+}
+
 type localTransport struct {
 	log               logr.Logger
 	codec             codec.Codec
@@ -120,5 +139,15 @@ func (t *localTransport) EnqueueAckRegisterObserver(ctx context.Context, receive
 
 func (t *localTransport) EnqueueInvokeMethodResponse(ctx context.Context, receiver grain.Identity, uuid string, payload []byte, err []byte) error {
 	t.h.ReceiveInvokeMethodResponse(ctx, receiver, uuid, payload, err)
+	return nil
+}
+
+func (t *localTransport) EnqueueUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string) error {
+	t.h.ReceiveUnsubscribeObserverRequest(ctx, observer, observable, name, uuid)
+	return nil
+}
+
+func (t *localTransport) EnqueueAckUnsubscribeObserver(ctx context.Context, receiver grain.Identity, uuid string, errOut []byte) error {
+	t.h.ReceiveAckUnsubscribeObserver(ctx, receiver, uuid, errOut)
 	return nil
 }

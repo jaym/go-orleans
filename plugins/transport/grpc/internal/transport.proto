@@ -4,16 +4,6 @@ package goor.transport.grpc;
 
 option go_package = "github.com/jaym/go-orleans/plugins/transport/grpc/internal";
 
-/*
-
-
-error EnqueueAckRegisterObserver(ctx context.Context, receiver grain.Identity,
-uuid string, errOut []byte) error EnqueueInvokeMethodResponse(ctx
-context.Context, receiver grain.Identity, uuid string, payload []byte, err
-[]byte) error
-
-*/
-
 message GrainIdentity {
   string grain_type = 1;
   string id = 2;
@@ -48,6 +38,12 @@ message RegisterObserver {
   bytes payload = 5;
 }
 
+message AckRegisterObserver {
+  GrainIdentity receiver = 1;
+  string uuid = 2;
+  bytes err = 3;
+}
+
 message ObserverNotification {
   GrainIdentity sender = 1;
   repeated GrainIdentity receivers = 2;
@@ -56,7 +52,14 @@ message ObserverNotification {
   bytes payload = 5;
 }
 
-message AckRegisterObserver {
+message UnsubscribeObserver {
+  GrainIdentity observer = 1;
+  GrainIdentity observable = 2;
+  string name = 3;
+  string uuid = 4;
+}
+
+message AckUnsubscribeObserver {
   GrainIdentity receiver = 1;
   string uuid = 2;
   bytes err = 3;
@@ -70,6 +73,8 @@ message TransportMessage {
     RegisterObserver register_observer = 3;
     ObserverNotification observer_notification = 4;
     AckRegisterObserver ack_register_observer = 5;
+    UnsubscribeObserver unsubscribe_observer = 6;
+    AckUnsubscribeObserver ack_unsubscribe_observer = 7;
   }
 }
 

@@ -318,6 +318,12 @@ func (t *transport) handleMsg(ctx context.Context, h cluster.TransportHandler, m
 	case *internal.TransportMessage_ObserverNotification:
 		req := m.ObserverNotification
 		h.ReceiveObserverNotification(ctx, grainIdent(req.Sender), grainIdents(req.Receivers), req.ObservableType, req.Name, req.Payload)
+	case *internal.TransportMessage_UnsubscribeObserver:
+		req := m.UnsubscribeObserver
+		h.ReceiveUnsubscribeObserverRequest(ctx, grainIdent(req.Observer), grainIdent(req.Observable), req.Name, req.Uuid)
+	case *internal.TransportMessage_AckUnsubscribeObserver:
+		req := m.AckUnsubscribeObserver
+		h.ReceiveAckUnsubscribeObserver(ctx, grainIdent(req.Receiver), req.Uuid, req.Err)
 	default:
 		t.log.Info("invalid message received")
 	}
@@ -428,6 +434,33 @@ func (t *transport) EnqueueInvokeMethodResponse(ctx context.Context, receiver gr
 				Uuid:     uuid,
 				Payload:  payload,
 				Err:      err,
+			},
+		},
+	}
+	return t.send(ctx, msg)
+}
+
+func (t *transport) EnqueueUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string) error {
+	msg := &internal.TransportMessage{
+		Msg: &internal.TransportMessage_UnsubscribeObserver{
+			UnsubscribeObserver: &internal.UnsubscribeObserver{
+				Observer:   internalGrainIdent(observer),
+				Observable: internalGrainIdent(observable),
+				Name:       name,
+				Uuid:       uuid,
+			},
+		},
+	}
+	return t.send(ctx, msg)
+}
+
+func (t *transport) EnqueueAckUnsubscribeObserver(ctx context.Context, receiver grain.Identity, uuid string, errOut []byte) error {
+	msg := &internal.TransportMessage{
+		Msg: &internal.TransportMessage_AckUnsubscribeObserver{
+			AckUnsubscribeObserver: &internal.AckUnsubscribeObserver{
+				Receiver: internalGrainIdent(receiver),
+				Uuid:     uuid,
+				Err:      errOut,
 			},
 		},
 	}

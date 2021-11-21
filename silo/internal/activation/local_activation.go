@@ -18,6 +18,7 @@ type grainActivationMessageType int
 const (
 	invokeMethod grainActivationMessageType = iota + 1
 	registerObserver
+	unsubscribeObserver
 	notifyObserver
 	triggerTimer
 )
@@ -36,6 +37,12 @@ type grainActivationRegisterObserver struct {
 	ResolveFunc func(err error)
 }
 
+type grainActivationUnsubscribeObserver struct {
+	Observer    grain.Identity
+	Name        string
+	ResolveFunc func(err error)
+}
+
 type grainActivationTriggerTimer struct {
 	Name string
 }
@@ -49,11 +56,12 @@ type grainActivationNotifyObserver struct {
 }
 
 type grainActivationMessage struct {
-	messageType      grainActivationMessageType
-	invokeMethod     *grainActivationInvokeMethod
-	registerObserver *grainActivationRegisterObserver
-	notifyObserver   *grainActivationNotifyObserver
-	triggerTimer     *grainActivationTriggerTimer
+	messageType         grainActivationMessageType
+	invokeMethod        *grainActivationInvokeMethod
+	registerObserver    *grainActivationRegisterObserver
+	unsubscribeObserver *grainActivationUnsubscribeObserver
+	notifyObserver      *grainActivationNotifyObserver
+	triggerTimer        *grainActivationTriggerTimer
 }
 
 type grainActivationEvict struct {
@@ -244,6 +252,15 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 			return proto.Unmarshal(req.Payload, in.(proto.Message))
 		})
 		req.ResolveFunc(err)
+	case unsubscribeObserver:
+		req := msg.unsubscribeObserver
+		o, err := l.findObserableDesc("", req.Name)
+		if err != nil {
+			req.ResolveFunc(err)
+			return
+		}
+		err = o.UnsubscribeHandler(activation, ctx, req.Observer)
+		req.ResolveFunc(err)
 	case notifyObserver:
 		l.grainActivator.resourceManager.Touch(l.identity)
 
@@ -284,6 +301,17 @@ func (l *LocalGrainActivation) RegisterObserver(observer grain.Identity, observa
 			Name:        observableType,
 			ResolveFunc: resolve,
 			Payload:     payload,
+		},
+	})
+}
+
+func (l *LocalGrainActivation) UnsubscribeObserver(observer grain.Identity, observableType string, resolve func(err error)) error {
+	return l.pushInbox(grainActivationMessage{
+		messageType: unsubscribeObserver,
+		unsubscribeObserver: &grainActivationUnsubscribeObserver{
+			Observer:    observer,
+			Name:        observableType,
+			ResolveFunc: resolve,
 		},
 	})
 }

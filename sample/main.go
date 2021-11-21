@@ -83,6 +83,10 @@ func (g *ChirperGrainImpl) RegisterMessageObserver(ctx context.Context, observer
 	return g.services.AddMessageObserver(ctx, observer, req)
 }
 
+func (g *ChirperGrainImpl) UnsubscribeMessageObserver(ctx context.Context, observer grain.Identity) error {
+	return g.services.RemoveMessageObserver(ctx, observer)
+}
+
 func (g *ChirperGrainImpl) OnNotifyMessage(ctx context.Context, req *examples.ChirpMessage) error {
 	fmt.Printf("%v got notification %q\n", g.Identity, req.Msg)
 	return nil
