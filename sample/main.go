@@ -69,7 +69,7 @@ func (g *ChirperGrainImpl) PublishMessage(ctx context.Context, req *examples.Pub
 		return nil, err
 	}
 	err = g.services.NotifyMessageObservers(ctx, observers, &examples.ChirpMessage{
-		Msg: "You've been notified",
+		Msg: fmt.Sprintf("You've been notified: %s", req.Msg),
 	})
 	if err != nil {
 		return nil, err
@@ -164,11 +164,44 @@ func main() {
 	// signals, similar to CTRL+C
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
+	subscriber, err := s.CreateGrain()
+	if err != nil {
+		panic(err)
+	}
+
+	stream, err := examples.CreateChirperGrainMessageStream(subscriber)
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		for {
+			c := stream.C()
+
+			select {
+			case <-stream.Done():
+				return
+			case msg := <-c:
+				if msg.Err != nil {
+					fmt.Printf(">>>>>>>>>>>>>>> SUBSCRIBER GOT ERROR: %v\n", msg.Err)
+				} else {
+					fmt.Printf(">>>>>>>>>>>>>>> SUBSCRIBER GOT MSG FROM %q: %v\n", msg.Sender, msg.Value)
+				}
+			}
+		}
+	}()
+
+	grainRef := examples.GetChirperGrain(s.Client(), grain.Identity{"ChirperGrain", "g2"})
+	err = grainRef.ObserveMessage(context.Background(), subscriber, &examples.SubscribeRequest{})
+	if err != nil {
+		panic(err)
+	}
+
 	go func(log logr.Logger, client grain.SiloClient) {
 		time.Sleep(2 * time.Second)
 		ctx := context.Background()
 		for {
-			i := rand.Intn(64)
+			i := rand.Intn(5)
 			gident := grain.Identity{
 				GrainType: "ChirperGrain",
 				ID:        fmt.Sprintf("g%d", i),

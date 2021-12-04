@@ -11,16 +11,12 @@ import (
 
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"
+	"github.com/jaym/go-orleans/grain/generic"
 	"github.com/jaym/go-orleans/silo/internal/activation"
 	"github.com/jaym/go-orleans/silo/services/cluster"
 	"github.com/jaym/go-orleans/silo/services/observer"
 	"github.com/jaym/go-orleans/silo/services/timer"
 )
-
-type ActivateGrainRequest struct {
-	Identity  grain.Identity
-	Activator GenericGrainActivator
-}
 
 type EvictGrainRequest struct {
 	Identity grain.Identity
@@ -197,22 +193,17 @@ func (m *GrainActivationManagerImpl) EnqueueObserverNotification(req ObserverNot
 	return nil
 }
 
-func (m *GrainActivationManagerImpl) ActivateGrain(req ActivateGrainRequest) error {
+func (m *GrainActivationManagerImpl) ActivateGenericGrain(g *generic.Grain) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	_, ok := m.grainActivations[req.Identity]
+	_, ok := m.grainActivations[g.Identity]
 	if !ok {
-		var a *activation.LocalGrainActivation
-		var err error
-		if req.Activator == nil {
-			a, err = m.localGrainActivator.ActivateGrainWithDefaultActivator(req.Identity)
-		} else {
-			a, err = m.localGrainActivator.ActivateGrainWithActivator(req.Identity, req.Activator)
-		}
+		a, err := m.localGrainActivator.ActivateGenericGrain(g)
 		if err != nil {
 			return err
 		}
-		m.grainActivations[req.Identity] = a
+		m.wg.Add(1)
+		m.grainActivations[g.Identity] = a
 	}
 	return nil
 }

@@ -6,11 +6,14 @@ import (
 	"runtime/pprof"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
+
+	gcontext "github.com/jaym/go-orleans/context"
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"
+	"github.com/jaym/go-orleans/grain/generic"
 	"github.com/jaym/go-orleans/silo/services/observer"
 	"github.com/jaym/go-orleans/silo/services/timer"
-	"google.golang.org/protobuf/proto"
 )
 
 type grainActivationMessageType int
@@ -107,13 +110,9 @@ func (m *LocalGrainActivator) ActivateGrainWithDefaultActivator(identity grain.I
 	return m.activateGrain(identity, grainDesc, activator)
 }
 
-func (m *LocalGrainActivator) ActivateGrainWithActivator(identity grain.Identity, activator interface{}) (*LocalGrainActivation, error) {
-	grainDesc, _, err := m.registrar.Lookup(identity.GrainType)
-	if err != nil {
-		return nil, err
-	}
-
-	return m.activateGrain(identity, grainDesc, activator)
+func (m *LocalGrainActivator) ActivateGenericGrain(g *generic.Grain) (*LocalGrainActivation, error) {
+	grainDesc := &generic.Descriptor
+	return m.activateGrain(g.Identity, grainDesc, g)
 }
 
 func (m *LocalGrainActivator) activateGrain(identity grain.Identity, grainDesc *descriptor.GrainDescription, activator interface{}) (*LocalGrainActivation, error) {
@@ -158,8 +157,10 @@ func (g *LocalGrainActivation) findObserableDesc(grainType, name string) (*descr
 }
 
 func (l *LocalGrainActivation) start() {
+	ctx := gcontext.WithIdentityContext(context.Background(), l.identity)
+
 	pprof.Do(
-		context.Background(),
+		ctx,
 		pprof.Labels("grain", l.identity.GrainType, "id", l.identity.ID),
 		func(ctx context.Context) {
 			go l.loop(ctx)
@@ -267,14 +268,23 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 		req := msg.notifyObserver
 		o, err := l.findObserableDesc(req.ObservableType, req.Name)
 		if err != nil {
-			panic(err)
-		}
-		err = o.Handler(activation, ctx, func(in interface{}) error {
-			return proto.Unmarshal(req.Payload, in.(proto.Message))
-		})
-		if err != nil {
+			// TODO: logger
 			fmt.Printf("err: %v\n", err)
 		}
+
+		decoder := func(in interface{}) error {
+			return proto.Unmarshal(req.Payload, in.(proto.Message))
+		}
+
+		if genericGrain, ok := activation.(*generic.Grain); ok {
+			genericGrain.HandleNotification(req.ObservableType, req.Name, req.Sender, decoder)
+		} else {
+			err = o.Handler(activation, ctx, decoder)
+			if err != nil {
+				fmt.Printf("err: %v\n", err)
+			}
+		}
+
 	case triggerTimer:
 		req := msg.triggerTimer
 		l.grainTimerService.Trigger(req.Name)

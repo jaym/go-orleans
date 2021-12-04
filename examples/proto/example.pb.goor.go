@@ -5,8 +5,8 @@ import (
 	context "context"
 	grain "github.com/jaym/go-orleans/grain"
 	descriptor "github.com/jaym/go-orleans/grain/descriptor"
+	generic "github.com/jaym/go-orleans/grain/generic"
 	services "github.com/jaym/go-orleans/grain/services"
-	silo "github.com/jaym/go-orleans/silo"
 )
 
 type ChirperGrainServices interface {
@@ -63,34 +63,58 @@ type ChirperGrainMessageObserver interface {
 	OnNotifyMessage(ctx context.Context, req *ChirpMessage) error
 }
 
-func CreateChirperGrainMessageObserver(ctx context.Context, s *silo.Silo, f func(ctx context.Context, req *ChirpMessage) error) (grain.GrainReference, error) {
-	identity, err := s.CreateGrain(&_Chirper_Message_ObserverActivator{
-		f: f,
-	})
+func CreateChirperGrainMessageStream(g *generic.Grain) (*ChirperGrainMessageStream, error) {
+	desc := ChirperGrain_GrainDesc.Observables[0]
+	genericStream, err := g.CreateStream(ChirperGrain_GrainDesc.GrainType, desc.Name)
 	if err != nil {
 		return nil, err
 	}
-	return identity, nil
+
+	stream := &ChirperGrainMessageStream{
+		Stream: genericStream,
+		c:      make(chan ChirperGrainMessageStreamMessage),
+	}
+
+	go func() {
+		c := stream.Stream.C()
+		for {
+			select {
+			case <-stream.Stream.Done():
+				return
+			case msg := <-c:
+				m := ChirperGrainMessageStreamMessage{
+					Sender: msg.Sender,
+				}
+				val := new(ChirpMessage)
+				if err := msg.Decode(val); err != nil {
+					m.Err = err
+				} else {
+					m.Value = val
+				}
+				select {
+				case stream.c <- m:
+				default:
+				}
+			}
+		}
+	}()
+
+	return stream, nil
 }
 
-type impl_ChirperGrainMessageObserver struct {
-	grain.Identity
-	f func(ctx context.Context, req *ChirpMessage) error
+type ChirperGrainMessageStreamMessage struct {
+	Sender grain.Identity
+	Value  *ChirpMessage
+	Err    error
 }
 
-func (g *impl_ChirperGrainMessageObserver) OnNotifyMessage(ctx context.Context, req *ChirpMessage) error {
-	return g.f(ctx, req)
+type ChirperGrainMessageStream struct {
+	generic.Stream
+	c chan ChirperGrainMessageStreamMessage
 }
 
-type _Chirper_Message_ObserverActivator struct {
-	f func(ctx context.Context, req *ChirpMessage) error
-}
-
-func (a *_Chirper_Message_ObserverActivator) Activate(ctx context.Context, identity grain.Identity) (grain.GrainReference, error) {
-	return &impl_ChirperGrainMessageObserver{
-		Identity: identity,
-		f:        a.f,
-	}, nil
+func (s *ChirperGrainMessageStream) C() <-chan ChirperGrainMessageStreamMessage {
+	return s.c
 }
 
 type ChirperGrainRef interface {

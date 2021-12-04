@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"google.golang.org/protobuf/compiler/protogen"
@@ -8,8 +9,8 @@ import (
 
 const (
 	contextPackage       = protogen.GoImportPath("context")
-	siloPackage          = protogen.GoImportPath("github.com/jaym/go-orleans/silo")
 	grainPackage         = protogen.GoImportPath("github.com/jaym/go-orleans/grain")
+	genericGrainPackage  = protogen.GoImportPath("github.com/jaym/go-orleans/grain/generic")
 	grainServicesPackage = protogen.GoImportPath("github.com/jaym/go-orleans/grain/services")
 	descriptorPackage    = protogen.GoImportPath("github.com/jaym/go-orleans/grain/descriptor")
 )
@@ -22,6 +23,8 @@ var (
 	registeredObserverType   = grainPackage.Ident("RegisteredObserver")
 	grainObserverManagerType = grainServicesPackage.Ident("GrainObserverManager")
 	coreGrainServicesType    = grainServicesPackage.Ident("CoreGrainServices")
+	genericGrainType         = genericGrainPackage.Ident("Grain")
+	streamType               = genericGrainPackage.Ident("Stream")
 )
 
 func GenerateGrain(g *protogen.GeneratedFile, f *protogen.File) error {
@@ -120,17 +123,19 @@ func grainInterfaceMethodSignature(g *protogen.GeneratedFile, m *protogen.Method
 }
 
 func generateGrainRef(g *protogen.GeneratedFile, svc *protogen.Service) {
+	idx := 0
 	for _, m := range svc.Methods {
 		if isObservable(m) {
-			generateGrainObserver(g, m)
+			generateGrainObserver(g, m, idx)
+			idx++
 		}
 	}
 	writeGrainRefInterface(g, svc)
 }
 
-func generateGrainObserver(g *protogen.GeneratedFile, m *protogen.Method) {
+func generateGrainObserver(g *protogen.GeneratedFile, m *protogen.Method, observerIdx int) {
 	writeGrainObserverInterface(g, m)
-	writeGrainObserverActivator(g, m)
+	writeGrainObservableStream(g, m, observerIdx)
 }
 
 func writeGrainObserverInterface(g *protogen.GeneratedFile, m *protogen.Method) {
@@ -145,80 +150,65 @@ func writeGrainObserverInterface(g *protogen.GeneratedFile, m *protogen.Method) 
 	g.P()
 }
 
-func observerActivatorName(m *protogen.Method) string {
-	builder := strings.Builder{}
-	builder.WriteRune('_')
-	builder.WriteString(m.Parent.GoName)
-	builder.WriteRune('_')
-	builder.WriteString(m.GoName)
-	builder.WriteString("_ObserverActivator")
-	return builder.String()
-}
+func writeGrainObservableStream(g *protogen.GeneratedFile, m *protogen.Method, observerIdx int) {
+	streamMessageName := fmt.Sprintf("%sGrain%sStreamMessage", m.Parent.GoName, m.GoName)
+	streamName := fmt.Sprintf("%sGrain%sStream", m.Parent.GoName, m.GoName)
 
-func anonymousObserverImplName(m *protogen.Method) string {
-	builder := strings.Builder{}
-	builder.WriteString("impl_")
-	builder.WriteString(m.Parent.GoName)
-	builder.WriteString("Grain")
-	builder.WriteString(m.GoName)
-	builder.WriteString("Observer")
-	return builder.String()
-}
-
-func writeGrainObserverActivator(g *protogen.GeneratedFile, m *protogen.Method) {
-
-	g.P("func Create", m.Parent.GoName, "Grain", m.GoName, "Observer(",
-		"ctx ", g.QualifiedGoIdent(contextType), ", ",
-		"s *", g.QualifiedGoIdent(siloPackage.Ident("Silo")), ", ",
-		"f func(", "ctx ", g.QualifiedGoIdent(contextType), ", ",
-		"req *", g.QualifiedGoIdent(m.Output.GoIdent),
-		") error", ") (", g.QualifiedGoIdent(grainRefType), ", error) {",
+	g.P("func Create", m.Parent.GoName, "Grain", m.GoName, "Stream(",
+		"g *", g.QualifiedGoIdent(genericGrainType), ")",
+		"( *", streamName, ", error) {",
 	)
-
-	g.P("identity, err := s.CreateGrain(&", observerActivatorName(m), " {")
-	g.P("f: f,")
-	g.P("})")
+	g.P("desc := ", m.Parent.GoName, "Grain_GrainDesc.Observables[", observerIdx, "]")
+	g.P("genericStream, err := g.CreateStream(", m.Parent.GoName, "Grain_GrainDesc.GrainType, desc.Name)")
 	g.P("if err != nil {")
-	g.P("return nil, err")
-	g.P("}")
-	g.P("return identity, nil")
-
+	g.P("  return nil, err")
 	g.P("}")
 	g.P()
-
-	g.P("type ", anonymousObserverImplName(m), " struct {")
-	g.P(g.QualifiedGoIdent(identityType))
-	g.P("f func(", "ctx ", g.QualifiedGoIdent(contextType), ", ",
-		"req *", g.QualifiedGoIdent(m.Output.GoIdent),
-		") error")
+	g.P("stream := &", streamName, "{")
+	g.P("  Stream: genericStream,")
+	g.P("  c: make(chan ", streamMessageName, "),")
 	g.P("}")
 	g.P()
-
-	g.P("func (g *", anonymousObserverImplName(m), ") OnNotify", m.GoName, "(",
-		"ctx ", g.QualifiedGoIdent(contextType), ", ",
-		"req *", g.QualifiedGoIdent(m.Output.GoIdent),
-		") error {",
-	)
-	g.P("return g.f(ctx, req)")
-	g.P("}")
-
-	g.P("type ", observerActivatorName(m), " struct {")
-	g.P("f func(", "ctx ", g.QualifiedGoIdent(contextType), ", ",
-		"req *", g.QualifiedGoIdent(m.Output.GoIdent),
-		") error")
+	g.P("go func() {")
+	g.P("  c := stream.Stream.C()")
+	g.P("  for {")
+	g.P("    select {")
+	g.P("    case <-stream.Stream.Done():")
+	g.P("      return")
+	g.P("    case msg := <-c:")
+	g.P("      m := ", streamMessageName, "{")
+	g.P("        Sender: msg.Sender,")
+	g.P("      }")
+	g.P("      val := new(", g.QualifiedGoIdent(m.Output.GoIdent), ")")
+	g.P("      if err := msg.Decode(val); err != nil {")
+	g.P("        m.Err = err")
+	g.P("      } else {")
+	g.P("        m.Value = val")
+	g.P("      }")
+	g.P("      select {")
+	g.P("      case stream.c <- m:")
+	g.P("      default:")
+	g.P("      }")
+	g.P("    }")
+	g.P("  }")
+	g.P("}()")
+	g.P()
+	g.P("return stream, nil")
 	g.P("}")
 	g.P()
-
-	g.P("func (a *", observerActivatorName(m), ") Activate(",
-		"ctx ", g.QualifiedGoIdent(contextType), ", ",
-		"identity ", g.QualifiedGoIdent(identityType), ") (",
-		g.QualifiedGoIdent(grainRefType), ", error) {",
-	)
-	g.P("return &", anonymousObserverImplName(m), "{")
-	g.P("Identity: identity,")
-	g.P("f: a.f,")
-	g.P("}, nil")
-
+	g.P("type ", streamMessageName, " struct {")
+	g.P("  Sender grain.Identity")
+	g.P("  Value  *", g.QualifiedGoIdent(m.Output.GoIdent))
+	g.P("  Err error")
+	g.P("}")
+	g.P()
+	g.P("type ", streamName, " struct {")
+	g.P("  ", g.QualifiedGoIdent(streamType))
+	g.P("  c chan ", streamMessageName)
+	g.P("}")
+	g.P()
+	g.P("func (s *", streamName, ") C() <-chan ", streamMessageName, "{")
+	g.P("  return s.c")
 	g.P("}")
 	g.P()
 }

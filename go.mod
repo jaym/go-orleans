@@ -61,6 +61,7 @@ require (
 	golang.org/x/net v0.0.0-20211013171255-e13a2654a71e // indirect
 	golang.org/x/sys v0.0.0-20211013075003-97ac67df715c // indirect
 	golang.org/x/text v0.3.7 // indirect
+	golang.org/x/tools v0.1.8-0.20211014194737-fc98fb2abd48 // indirect
 	google.golang.org/genproto v0.0.0-20211013025323-ce878158c4d4 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 )

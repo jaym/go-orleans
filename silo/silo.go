@@ -10,6 +10,7 @@ import (
 
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"
+	"github.com/jaym/go-orleans/grain/generic"
 	"github.com/jaym/go-orleans/plugins/codec/protobuf"
 	"github.com/jaym/go-orleans/silo/internal/transport"
 	"github.com/jaym/go-orleans/silo/services/cluster"
@@ -137,8 +138,6 @@ func (s *Silo) Start(ctx context.Context) error {
 		return err
 	}
 
-	s.Register(&grain_GrainDesc, nil)
-
 	return s.localGrainManager.Start(ctx)
 }
 
@@ -146,16 +145,17 @@ func (s *Silo) Client() grain.SiloClient {
 	return s.client
 }
 
-func (s *Silo) CreateGrain(activator GenericGrainActivator) (grain.Identity, error) {
-	identity := grain.Identity{
-		GrainType: "Grain",
+func (s *Silo) CreateGrain() (*generic.Grain, error) {
+	g := generic.NewGrain(grain.Identity{
+		GrainType: "GenericGrain",
 		ID:        ksuid.New().String(),
-	}
-	err := s.localGrainManager.ActivateGrain(ActivateGrainRequest{
-		Identity:  identity,
-		Activator: activator,
 	})
-	return identity, err
+
+	err := s.localGrainManager.ActivateGenericGrain(g)
+	if err != nil {
+		return nil, err
+	}
+	return g, nil
 }
 
 func (s *Silo) Stop(ctx context.Context) error {
