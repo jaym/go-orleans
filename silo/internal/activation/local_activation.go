@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/pprof"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -71,13 +72,23 @@ type grainActivationEvict struct {
 	mustStop bool
 }
 
+type grainState int
+
+const (
+	grainStateRun grainState = iota
+	grainStateDeactivate
+)
+
 type LocalGrainActivation struct {
+	lock       sync.RWMutex
+	grainState grainState
+	evictChan  chan grainActivationEvict
+	inbox      chan grainActivationMessage
+
 	identity          grain.Identity
 	description       *descriptor.GrainDescription
 	activator         interface{}
 	grainTimerService *grainTimerServiceImpl
-	evictChan         chan grainActivationEvict
-	inbox             chan grainActivationMessage
 	grainActivator    *LocalGrainActivator
 }
 
@@ -218,9 +229,14 @@ func (l *LocalGrainActivation) evict(ctx context.Context, activation grain.Grain
 		canEvict = hasCanEvict.CanEvict(ctx)
 	}
 	if canEvict || mustStop {
+		l.lock.Lock()
+		l.grainState = grainStateDeactivate
+		close(l.inbox)
+		l.lock.Unlock()
 		if hasDeactivate, ok := activation.(HasDeactivate); ok {
 			hasDeactivate.Deactivate(ctx)
 		}
+		l.drain(ctx)
 		return true
 	}
 	return false
@@ -291,6 +307,24 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 	}
 }
 
+func (l *LocalGrainActivation) drain(ctx context.Context) {
+	for msg := range l.inbox {
+		switch msg.messageType {
+		case invokeMethod:
+			req := msg.invokeMethod
+			req.ResolveFunc(nil, ErrGrainDeactivating)
+		case registerObserver:
+			req := msg.registerObserver
+			req.ResolveFunc(ErrGrainDeactivating)
+		case unsubscribeObserver:
+			req := msg.unsubscribeObserver
+			req.ResolveFunc(ErrGrainDeactivating)
+		case notifyObserver:
+		case triggerTimer:
+		}
+	}
+}
+
 func (l *LocalGrainActivation) InvokeMethod(sender grain.Identity, method string, payload []byte, resolve func(out interface{}, err error)) error {
 	return l.pushInbox(grainActivationMessage{
 		messageType: invokeMethod,
@@ -348,6 +382,12 @@ func (l *LocalGrainActivation) NotifyTimer(name string) error {
 }
 
 func (l *LocalGrainActivation) Evict() error {
+	l.lock.RLock()
+	defer l.lock.RUnlock()
+	if l.grainState == grainStateDeactivate {
+		return nil
+	}
+
 	select {
 	case l.evictChan <- grainActivationEvict{}:
 	default:
@@ -357,6 +397,12 @@ func (l *LocalGrainActivation) Evict() error {
 }
 
 func (l *LocalGrainActivation) Stop() error {
+	l.lock.RLock()
+	defer l.lock.RUnlock()
+	if l.grainState == grainStateDeactivate {
+		return nil
+	}
+
 	select {
 	case l.evictChan <- grainActivationEvict{
 		mustStop: true,
@@ -372,6 +418,13 @@ func (l *LocalGrainActivation) Name() string {
 }
 
 func (l *LocalGrainActivation) pushInbox(msg grainActivationMessage) error {
+	l.lock.RLock()
+	defer l.lock.RUnlock()
+
+	if l.grainState == grainStateDeactivate {
+		return ErrGrainDeactivating
+	}
+
 	select {
 	case l.inbox <- msg:
 	default:
@@ -382,3 +435,4 @@ func (l *LocalGrainActivation) pushInbox(msg grainActivationMessage) error {
 
 var ErrInboxFull = errors.New("inbox full")
 var ErrGrainActivationNotFound = errors.New("grain activation not found")
+var ErrGrainDeactivating = errors.New("grain is deactivating")
