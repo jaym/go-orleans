@@ -7,6 +7,7 @@ import (
 	"github.com/go-logr/logr"
 	gcontext "github.com/jaym/go-orleans/context"
 	"github.com/jaym/go-orleans/grain"
+	"github.com/jaym/go-orleans/grain/generic"
 	"github.com/jaym/go-orleans/plugins/codec"
 	"github.com/jaym/go-orleans/silo/internal/transport"
 	"github.com/jaym/go-orleans/silo/services/cluster"
@@ -23,6 +24,16 @@ type siloClientImpl struct {
 }
 
 func (s *siloClientImpl) getGrainAddress(ctx context.Context, ident grain.Identity) (cluster.GrainAddress, error) {
+	if generic.IsGenericGrain(ident) {
+		location, err := generic.ParseIdentity(ident)
+		if err != nil {
+			return cluster.GrainAddress{}, err
+		}
+		return cluster.GrainAddress{
+			Location: cluster.Location(location),
+			Identity: ident,
+		}, nil
+	}
 	grainAddress, err := s.grainDirectory.Lookup(ctx, ident)
 	if err != nil {
 		if err == cluster.ErrGrainActivationNotFound {

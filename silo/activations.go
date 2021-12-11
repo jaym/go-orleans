@@ -269,6 +269,10 @@ func (m *GrainActivationManagerImpl) Stop(ctx context.Context) error {
 }
 
 func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allowActivation bool) (*activation.LocalGrainActivation, error) {
+	if generic.IsGenericGrain(receiver) {
+		allowActivation = false
+	}
+
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	if !m.serving {

@@ -7,7 +7,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
 	"github.com/hashicorp/go-multierror"
-	"github.com/segmentio/ksuid"
 
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"
@@ -149,10 +148,7 @@ func (s *Silo) Client() grain.SiloClient {
 }
 
 func (s *Silo) CreateGrain() (*generic.Grain, error) {
-	g := generic.NewGrain(grain.Identity{
-		GrainType: "GenericGrain",
-		ID:        ksuid.New().String(),
-	})
+	g := generic.NewGrain(string(s.nodeName))
 
 	err := s.localGrainManager.ActivateGenericGrain(g)
 	if err != nil {
