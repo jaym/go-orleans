@@ -193,13 +193,19 @@ func (l *LocalGrainActivation) loop(ctx context.Context) {
 		siloClient:         l.grainActivator.siloClient,
 	}
 
+	defer l.grainActivator.deactivateCallback(l.identity)
+
 	if err := l.grainActivator.resourceManager.Touch(l.identity); err != nil {
+		l.setStateDeactivate()
+		l.drain(ctx, ErrNoCapacity)
 		return
 	}
 
 	activation, err := l.description.Activation.Handler(l.activator, ctx, coreServices, observerManager, l.identity)
 	if err != nil {
-		panic(err)
+		l.setStateDeactivate()
+		l.drain(ctx, err)
+		return
 	}
 LOOP:
 	for {
@@ -220,7 +226,13 @@ LOOP:
 			l.processMessage(ctx, activation, msg)
 		}
 	}
-	l.grainActivator.deactivateCallback(l.identity)
+}
+
+func (l *LocalGrainActivation) setStateDeactivate() {
+	l.lock.Lock()
+	l.grainState = grainStateDeactivate
+	close(l.inbox)
+	l.lock.Unlock()
 }
 
 func (l *LocalGrainActivation) evict(ctx context.Context, activation grain.GrainReference, mustStop bool) bool {
@@ -229,14 +241,11 @@ func (l *LocalGrainActivation) evict(ctx context.Context, activation grain.Grain
 		canEvict = hasCanEvict.CanEvict(ctx)
 	}
 	if canEvict || mustStop {
-		l.lock.Lock()
-		l.grainState = grainStateDeactivate
-		close(l.inbox)
-		l.lock.Unlock()
+		l.setStateDeactivate()
 		if hasDeactivate, ok := activation.(HasDeactivate); ok {
 			hasDeactivate.Deactivate(ctx)
 		}
-		l.drain(ctx)
+		l.drain(ctx, ErrGrainDeactivating)
 		return true
 	}
 	return false
@@ -307,18 +316,18 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 	}
 }
 
-func (l *LocalGrainActivation) drain(ctx context.Context) {
+func (l *LocalGrainActivation) drain(ctx context.Context, err error) {
 	for msg := range l.inbox {
 		switch msg.messageType {
 		case invokeMethod:
 			req := msg.invokeMethod
-			req.ResolveFunc(nil, ErrGrainDeactivating)
+			req.ResolveFunc(nil, err)
 		case registerObserver:
 			req := msg.registerObserver
-			req.ResolveFunc(ErrGrainDeactivating)
+			req.ResolveFunc(err)
 		case unsubscribeObserver:
 			req := msg.unsubscribeObserver
-			req.ResolveFunc(ErrGrainDeactivating)
+			req.ResolveFunc(err)
 		case notifyObserver:
 		case triggerTimer:
 		}
