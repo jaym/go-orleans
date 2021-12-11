@@ -371,6 +371,7 @@ func (m *Manager) ObserverNotificationAsync(ctx context.Context, sender grain.Id
 		t, err := m.getTransport(location)
 		if err != nil {
 			combinedErrors = errors.CombineErrors(combinedErrors, err)
+			continue
 		}
 		if err := t.internal.transport.EnqueueObserverNotification(ctx, sender, rs, observableType, name, payload); err != nil {
 			combinedErrors = errors.CombineErrors(combinedErrors, err)
