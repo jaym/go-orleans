@@ -296,6 +296,7 @@ func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allo
 	return a, nil
 }
 
-var ErrInboxFull = errors.New("inbox full")
-var ErrGrainActivationNotFound = errors.New("grain activation not found")
+var ErrInboxFull = activation.ErrInboxFull
+var ErrGrainActivationNotFound = activation.ErrGrainActivationNotFound
+var ErrGrainDeactivating = activation.ErrGrainDeactivating
 var ErrUnavailable = errors.New("unavailable")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
 	"github.com/hashicorp/go-multierror"
 	"github.com/segmentio/ksuid"
@@ -67,7 +68,9 @@ func NewSilo(log logr.Logger, observerStore observer.Store, opts ...SiloOption) 
 			Name:     name,
 		})
 		if err != nil {
-			s.log.V(1).Error(err, "failed to trigger timer notification", "identity", grainAddr, "triggerName", name)
+			if !(errors.Is(err, ErrGrainActivationNotFound) || errors.Is(err, ErrGrainDeactivating)) {
+				s.log.V(1).Error(err, "failed to trigger timer notification", "identity", grainAddr, "triggerName", name)
+			}
 		}
 	})
 	s.localGrainManager = NewGrainActivationManager(
