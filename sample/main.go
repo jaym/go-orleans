@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	stdlog "log"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -12,7 +11,7 @@ import (
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/go-logr/logr"
-	"github.com/go-logr/stdr"
+	"github.com/go-logr/zerologr"
 	_ "github.com/jackc/pgx/v4/stdlib"
 	examples "github.com/jaym/go-orleans/examples/proto"
 	"github.com/jaym/go-orleans/grain"
@@ -26,6 +25,7 @@ import (
 	"github.com/jaym/go-orleans/silo"
 	"github.com/jaym/go-orleans/silo/services/cluster"
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog"
 )
 
 type ChirperGrainActivatorTestImpl struct {
@@ -131,8 +131,13 @@ func main() {
 		panic(err)
 	}
 
-	stdr.SetVerbosity(4)
-	log := stdr.NewWithOptions(stdlog.New(os.Stderr, "", stdlog.LstdFlags), stdr.Options{LogCaller: stdr.All})
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
+	zerologr.NameFieldName = "logger"
+	zerologr.NameSeparator = "/"
+
+	zl := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr})
+	zl = zl.With().Timestamp().Logger()
+	var log logr.Logger = zerologr.New(&zl)
 
 	observerStore := observer_psql.NewObserverStore(log.WithName("observerstore"), poolObservers, psql.WithCodec(protobuf.NewCodec()))
 	d := static.New([]string{"127.0.0.1:9991", "127.0.0.1:9992"})
@@ -197,32 +202,42 @@ func main() {
 		panic(err)
 	}
 
-	go func(log logr.Logger, client grain.SiloClient) {
-		time.Sleep(2 * time.Second)
-		ctx := context.Background()
-		for {
-			i := rand.Intn(5)
-			gident := grain.Identity{
-				GrainType: "ChirperGrain",
-				ID:        fmt.Sprintf("g%d", i),
-			}
-			log.Info("Calling grain", "grain", gident)
+	closeChan := make(chan struct{})
+	if os.Args[1] == "node1" {
+		for i := 0; i < 10; i++ {
+			go func(log logr.Logger, client grain.SiloClient) {
+				time.Sleep(2 * time.Second)
+				ctx := context.Background()
+				for {
+					select {
+					case <-closeChan:
+						return
+					default:
+					}
+					i := rand.Intn(64)
+					gident := grain.Identity{
+						GrainType: "ChirperGrain",
+						ID:        fmt.Sprintf("g%d", i),
+					}
+					log.Info("Calling grain", "grain", gident)
 
-			grainRef := examples.GetChirperGrain(client, gident)
-			resp, err := grainRef.PublishMessage(ctx, &examples.PublishMessageRequest{
-				Msg: fmt.Sprintf("calling for %d", i),
-			})
-			if err != nil {
-				log.Error(err, "failed to call chirper grain", "grain", gident)
-			} else {
-				log.Info("got response", "msg", resp.Foobar)
-			}
-			time.Sleep(1 * time.Second)
+					grainRef := examples.GetChirperGrain(client, gident)
+					resp, err := grainRef.PublishMessage(ctx, &examples.PublishMessageRequest{
+						Msg: fmt.Sprintf("calling for %d", i),
+					})
+					if err != nil {
+						log.Error(err, "failed to call chirper grain", "grain", gident)
+					} else {
+						log.Info("got response", "msg", resp.Foobar)
+					}
+					time.Sleep(1 * time.Second)
+				}
+
+			}(log.WithName("client"), s.Client())
 		}
-
-	}(log.WithName("clienter"), s.Client())
-
+	}
 	<-stop
+	close(closeChan)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()

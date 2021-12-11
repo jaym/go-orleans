@@ -4,11 +4,13 @@ go 1.17
 
 require (
 	github.com/fergusstrange/embedded-postgres v1.11.0
-	github.com/go-logr/logr v1.1.0
+	github.com/go-logr/logr v1.2.0
 	github.com/go-logr/stdr v1.1.0
+	github.com/go-logr/zerologr v1.2.1
 	github.com/jackc/pgx/v4 v4.13.0
 	github.com/jaym/go-orleans v0.0.0
 	github.com/pkg/errors v0.9.1
+	github.com/rs/zerolog v1.25.0
 	github.com/stretchr/testify v1.7.0
 	google.golang.org/grpc v1.41.0
 )
