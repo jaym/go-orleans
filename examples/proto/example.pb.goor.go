@@ -7,13 +7,14 @@ import (
 	descriptor "github.com/jaym/go-orleans/grain/descriptor"
 	generic "github.com/jaym/go-orleans/grain/generic"
 	services "github.com/jaym/go-orleans/grain/services"
+	time "time"
 )
 
 type ChirperGrainServices interface {
 	CoreGrainServices() services.CoreGrainServices
 	NotifyMessageObservers(ctx context.Context, observers []grain.RegisteredObserver, val *ChirpMessage) error
 	ListMessageObservers(ctx context.Context) ([]grain.RegisteredObserver, error)
-	AddMessageObserver(ctx context.Context, observer grain.Identity, req *SubscribeRequest) error
+	AddMessageObserver(ctx context.Context, observer grain.Identity, registrationTimeout time.Duration, req *SubscribeRequest) error
 	RemoveMessageObserver(ctx context.Context, observer grain.Identity) error
 }
 
@@ -34,8 +35,8 @@ func (m *impl_ChirperGrainServices) ListMessageObservers(ctx context.Context) ([
 	return m.observerManager.List(ctx, ChirperGrain_GrainDesc.Observables[0].Name)
 }
 
-func (m *impl_ChirperGrainServices) AddMessageObserver(ctx context.Context, observer grain.Identity, req *SubscribeRequest) error {
-	_, err := m.observerManager.Add(ctx, ChirperGrain_GrainDesc.Observables[0].Name, observer, req)
+func (m *impl_ChirperGrainServices) AddMessageObserver(ctx context.Context, observer grain.Identity, registrationTimeout time.Duration, req *SubscribeRequest) error {
+	_, err := m.observerManager.Add(ctx, ChirperGrain_GrainDesc.Observables[0].Name, observer, registrationTimeout, req)
 	return err
 }
 
@@ -54,7 +55,7 @@ func RegisterChirperGrainActivator(registrar descriptor.Registrar, activator Chi
 type ChirperGrain interface {
 	grain.GrainReference
 	PublishMessage(ctx context.Context, req *PublishMessageRequest) (*PublishMessageResponse, error)
-	RegisterMessageObserver(ctx context.Context, observer grain.Identity, req *SubscribeRequest) error
+	RegisterMessageObserver(ctx context.Context, observer grain.Identity, registrationTimeout time.Duration, req *SubscribeRequest) error
 	UnsubscribeMessageObserver(ctx context.Context, observer grain.Identity) error
 }
 
@@ -116,6 +117,9 @@ type ChirperGrainMessageStream struct {
 func (s *ChirperGrainMessageStream) C() <-chan ChirperGrainMessageStreamMessage {
 	return s.c
 }
+func (s *ChirperGrainMessageStream) Observe(ctx context.Context, observable grain.Identity, req *SubscribeRequest) error {
+	return s.Stream.GenericObserve(ctx, observable, req)
+}
 
 type ChirperGrainRef interface {
 	grain.GrainReference
@@ -170,13 +174,13 @@ func _ChirperGrain_Message_ObserverHandler(srv interface{}, ctx context.Context,
 
 	return srv.(ChirperGrainMessageObserver).OnNotifyMessage(ctx, in)
 }
-func _ChirperGrain_Message_RegisterObserverHandler(srv interface{}, ctx context.Context, observer grain.Identity, dec func(interface{}) error) error {
+func _ChirperGrain_Message_RegisterObserverHandler(srv interface{}, ctx context.Context, observer grain.Identity, registrationTimeout time.Duration, dec func(interface{}) error) error {
 	in := new(SubscribeRequest)
 	if err := dec(in); err != nil {
 		return err
 	}
 
-	return srv.(ChirperGrain).RegisterMessageObserver(ctx, observer, in)
+	return srv.(ChirperGrain).RegisterMessageObserver(ctx, observer, registrationTimeout, in)
 }
 func _ChirperGrain_Message_UnsubscribeObserverHandler(srv interface{}, ctx context.Context, observer grain.Identity) error {
 	return srv.(ChirperGrain).UnsubscribeMessageObserver(ctx, observer)

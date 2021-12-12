@@ -74,6 +74,7 @@ func (s *PSQLStore) startBackgroundCleaner() {
 			case <-s.stopChan:
 				return
 			case <-s.cleanupChan:
+				// TODO: delete the rows
 			default:
 			}
 		}
@@ -107,7 +108,7 @@ func (s *PSQLStore) List(ctx context.Context, owner grain.Identity, observableNa
 			log.V(0).Error(err, "invald observer identity", "id", r.ID, "observer", r.ObserverGrain)
 			return nil, err
 		}
-		observer := newRegisteredObserver(s.codec, ident, r.ObservableName, r.Val)
+		observer := newRegisteredObserver(s.codec, ident, r.ObservableName, r.Expires.Time, r.Val)
 		observers = append(observers, observer)
 	}
 

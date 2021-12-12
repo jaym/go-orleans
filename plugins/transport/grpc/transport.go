@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	gogoproto "github.com/gogo/protobuf/proto"
@@ -311,7 +312,9 @@ func (t *transport) handleMsg(ctx context.Context, h cluster.TransportHandler, m
 		h.ReceiveInvokeMethodResponse(ctx, grainIdent(req.Receiver), req.Uuid, req.Payload, req.Err)
 	case *internal.TransportMessage_RegisterObserver:
 		req := m.RegisterObserver
-		h.ReceiveRegisterObserverRequest(ctx, grainIdent(req.Observer), grainIdent(req.Observable), req.Name, req.Uuid, req.Payload)
+		h.ReceiveRegisterObserverRequest(ctx, grainIdent(req.Observer), grainIdent(req.Observable), req.Name, req.Uuid, req.Payload, cluster.EnqueueRegisterObserverRequestOptions{
+			RegistrationTimeout: time.Duration(req.GetOpts().GetRegistrationTimeoutMillis()) * time.Millisecond,
+		})
 	case *internal.TransportMessage_AckRegisterObserver:
 		req := m.AckRegisterObserver
 		h.ReceiveAckRegisterObserver(ctx, grainIdent(req.Receiver), req.Uuid, req.Err)
@@ -383,7 +386,7 @@ func (t *transport) EnqueueInvokeMethodRequest(ctx context.Context, sender grain
 	return t.send(ctx, msg)
 }
 
-func (t *transport) EnqueueRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte) error {
+func (t *transport) EnqueueRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte, opts cluster.EnqueueRegisterObserverRequestOptions) error {
 	msg := &internal.TransportMessage{
 		Msg: &internal.TransportMessage_RegisterObserver{
 			RegisterObserver: &internal.RegisterObserver{
@@ -392,6 +395,9 @@ func (t *transport) EnqueueRegisterObserverRequest(ctx context.Context, observer
 				Name:       name,
 				Uuid:       uuid,
 				Payload:    payload,
+				Opts: &internal.RegisterObserverOptions{
+					RegistrationTimeoutMillis: int64(opts.RegistrationTimeout.Milliseconds()),
+				},
 			},
 		},
 	}

@@ -83,7 +83,12 @@ func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver grain.Identi
 }
 
 func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer grain.Identity, observable grain.Identity,
-	name string, in proto.Message) grain.RegisterObserverFuture {
+	name string, in proto.Message, opts ...grain.RegisterObserverOption) grain.RegisterObserverFuture {
+
+	options := grain.RegisterObserverOptions{}
+	for _, o := range opts {
+		o(&options)
+	}
 
 	id := ksuid.New().String()
 
@@ -100,7 +105,7 @@ func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer grain.Id
 		return registerObserverFailedFuture{err: err}
 	}
 
-	f, err := s.transportManager.RegisterObserver(ctx, observer, addr, name, id, data)
+	f, err := s.transportManager.RegisterObserver(ctx, observer, addr, name, id, data, options.RegistrationTimeout)
 	if err != nil {
 		return registerObserverFailedFuture{err: err}
 	}

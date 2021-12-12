@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime/pprof"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -35,10 +36,11 @@ type grainActivationInvokeMethod struct {
 }
 
 type grainActivationRegisterObserver struct {
-	Observer    grain.Identity
-	Name        string
-	Payload     []byte
-	ResolveFunc func(err error)
+	Observer            grain.Identity
+	Name                string
+	Payload             []byte
+	RegistrationTimeout time.Duration
+	ResolveFunc         func(err error)
 }
 
 type grainActivationUnsubscribeObserver struct {
@@ -274,7 +276,7 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 			req.ResolveFunc(err)
 			return
 		}
-		err = o.RegisterHandler(activation, ctx, req.Observer, func(in interface{}) error {
+		err = o.RegisterHandler(activation, ctx, req.Observer, req.RegistrationTimeout, func(in interface{}) error {
 			return proto.Unmarshal(req.Payload, in.(proto.Message))
 		})
 		req.ResolveFunc(err)
@@ -346,14 +348,15 @@ func (l *LocalGrainActivation) InvokeMethod(sender grain.Identity, method string
 	})
 }
 
-func (l *LocalGrainActivation) RegisterObserver(observer grain.Identity, observableType string, payload []byte, resolve func(err error)) error {
+func (l *LocalGrainActivation) RegisterObserver(observer grain.Identity, observableType string, payload []byte, registrationTimeout time.Duration, resolve func(err error)) error {
 	return l.pushInbox(grainActivationMessage{
 		messageType: registerObserver,
 		registerObserver: &grainActivationRegisterObserver{
-			Observer:    observer,
-			Name:        observableType,
-			ResolveFunc: resolve,
-			Payload:     payload,
+			Observer:            observer,
+			Name:                observableType,
+			ResolveFunc:         resolve,
+			RegistrationTimeout: registrationTimeout,
+			Payload:             payload,
 		},
 	})
 }

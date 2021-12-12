@@ -9,6 +9,7 @@ import (
 
 const (
 	contextPackage       = protogen.GoImportPath("context")
+	timePackage          = protogen.GoImportPath("time")
 	grainPackage         = protogen.GoImportPath("github.com/jaym/go-orleans/grain")
 	genericGrainPackage  = protogen.GoImportPath("github.com/jaym/go-orleans/grain/generic")
 	grainServicesPackage = protogen.GoImportPath("github.com/jaym/go-orleans/grain/services")
@@ -17,6 +18,7 @@ const (
 
 var (
 	contextType              = contextPackage.Ident("Context")
+	durationType             = timePackage.Ident("Duration")
 	siloClientType           = grainPackage.Ident("SiloClient")
 	grainRefType             = grainPackage.Ident("GrainReference")
 	identityType             = grainPackage.Ident("Identity")
@@ -83,6 +85,9 @@ func grainInterfaceRegisterObserverSignature(g *protogen.GeneratedFile, m *proto
 	builder.WriteString(", ")
 	builder.WriteString("observer ")
 	builder.WriteString(g.QualifiedGoIdent(identityType))
+	builder.WriteString(", ")
+	builder.WriteString("registrationTimeout ")
+	builder.WriteString(g.QualifiedGoIdent(durationType))
 	builder.WriteString(", ")
 	builder.WriteString("req *")
 	builder.WriteString(g.QualifiedGoIdent(m.Input.GoIdent))
@@ -210,6 +215,13 @@ func writeGrainObservableStream(g *protogen.GeneratedFile, m *protogen.Method, o
 	g.P("func (s *", streamName, ") C() <-chan ", streamMessageName, "{")
 	g.P("  return s.c")
 	g.P("}")
+
+	g.P("func (s *", streamName, ") Observe(",
+		"ctx ", g.QualifiedGoIdent(contextType), ", ",
+		"observable ", g.QualifiedGoIdent(identityType), ", ",
+		"req *", g.QualifiedGoIdent(m.Input.GoIdent), ") error {")
+	g.P("  return s.Stream.GenericObserve(ctx, observable, req)")
+	g.P("}")
 	g.P()
 }
 
@@ -293,6 +305,7 @@ func writeGrainServicesInterface(g *protogen.GeneratedFile, svc *protogen.Servic
 			g.P("Add", m.GoName, "Observer(",
 				"ctx ", g.QualifiedGoIdent(contextType), ",",
 				"observer ", g.QualifiedGoIdent(identityType), ",",
+				"registrationTimeout ", g.QualifiedGoIdent(durationType), ", ",
 				"req *", g.QualifiedGoIdent(m.Input.GoIdent), ",",
 				") error",
 			)
@@ -347,13 +360,14 @@ func writeGrainServicesImplementation(g *protogen.GeneratedFile, svc *protogen.S
 			g.P("func (m *", "impl_", svc.GoName, "GrainServices) Add", m.GoName, "Observer(",
 				"ctx ", g.QualifiedGoIdent(contextType), ",",
 				"observer ", g.QualifiedGoIdent(identityType), ",",
+				"registrationTimeout ", g.QualifiedGoIdent(durationType), ", ",
 				"req *", g.QualifiedGoIdent(m.Input.GoIdent), ",",
 				") error {",
 			)
 			g.P("_, err := m.observerManager.Add(",
 				"ctx,",
 				"ChirperGrain_GrainDesc.Observables[", observerIdx, "].Name,",
-				"observer, req)",
+				"observer, registrationTimeout, req)",
 			)
 			g.P("return err")
 			g.P("}")
@@ -492,6 +506,7 @@ func writeRegisterObserverHandler(g *protogen.GeneratedFile, m *protogen.Method)
 		"srv interface{},",
 		"ctx ", g.QualifiedGoIdent(contextType), ", ",
 		"observer ", g.QualifiedGoIdent(identityType), ", ",
+		"registrationTimeout ", g.QualifiedGoIdent(durationType), ", ",
 		"dec func(interface{}) error) error {",
 	)
 	g.P("in := new(", g.QualifiedGoIdent(m.Input.GoIdent), ")")
@@ -500,7 +515,7 @@ func writeRegisterObserverHandler(g *protogen.GeneratedFile, m *protogen.Method)
 	g.P("return err")
 	g.P("}")
 	g.P()
-	g.P("return srv.(", m.Parent.GoName, "Grain).Register", m.GoName, "Observer(ctx, observer, in)")
+	g.P("return srv.(", m.Parent.GoName, "Grain).Register", m.GoName, "Observer(ctx, observer, registrationTimeout, in)")
 
 	g.P("}")
 }

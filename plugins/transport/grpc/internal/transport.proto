@@ -36,6 +36,12 @@ message RegisterObserver {
   string name = 3;
   string uuid = 4;
   bytes payload = 5;
+  RegisterObserverOptions opts = 6;
+}
+
+message RegisterObserverOptions {
+  // TODO: replace with Duration type
+  int64 registrationTimeoutMillis = 1;
 }
 
 message AckRegisterObserver {

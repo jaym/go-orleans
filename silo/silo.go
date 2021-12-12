@@ -148,7 +148,7 @@ func (s *Silo) Client() grain.SiloClient {
 }
 
 func (s *Silo) CreateGrain() (*generic.Grain, error) {
-	g := generic.NewGrain(string(s.nodeName))
+	g := generic.NewGrain(string(s.nodeName), s.client)
 
 	err := s.localGrainManager.ActivateGenericGrain(g)
 	if err != nil {

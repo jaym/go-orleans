@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
@@ -79,8 +78,8 @@ func (g *ChirperGrainImpl) PublishMessage(ctx context.Context, req *examples.Pub
 	}, nil
 }
 
-func (g *ChirperGrainImpl) RegisterMessageObserver(ctx context.Context, observer grain.Identity, req *examples.SubscribeRequest) error {
-	return g.services.AddMessageObserver(ctx, observer, req)
+func (g *ChirperGrainImpl) RegisterMessageObserver(ctx context.Context, observer grain.Identity, registrationTimeout time.Duration, req *examples.SubscribeRequest) error {
+	return g.services.AddMessageObserver(ctx, observer, registrationTimeout, req)
 }
 
 func (g *ChirperGrainImpl) UnsubscribeMessageObserver(ctx context.Context, observer grain.Identity) error {
@@ -196,15 +195,14 @@ func main() {
 		}
 	}()
 
-	grainRef := examples.GetChirperGrain(s.Client(), grain.Identity{"ChirperGrain", "g2"})
-	err = grainRef.ObserveMessage(context.Background(), subscriber, &examples.SubscribeRequest{})
+	err = stream.Observe(context.Background(), grain.Identity{"ChirperGrain", "g2"}, &examples.SubscribeRequest{})
 	if err != nil {
 		panic(err)
 	}
 
 	closeChan := make(chan struct{})
 	if os.Args[1] == "node1" {
-		for i := 0; i < 10; i++ {
+		for i := 0; i < 1; i++ {
 			go func(log logr.Logger, client grain.SiloClient) {
 				time.Sleep(2 * time.Second)
 				ctx := context.Background()
@@ -214,7 +212,8 @@ func main() {
 						return
 					default:
 					}
-					i := rand.Intn(64)
+					//i := rand.Intn(64)
+					i := 2
 					gident := grain.Identity{
 						GrainType: "ChirperGrain",
 						ID:        fmt.Sprintf("g%d", i),
@@ -239,7 +238,7 @@ func main() {
 	<-stop
 	close(closeChan)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := s.Stop(ctx); err != nil {
 		panic(err)

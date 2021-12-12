@@ -208,6 +208,7 @@ func (s *timerServiceImpl) register(ident grain.Identity, name string, d time.Du
 		grainAddr: ident,
 		name:      name,
 		triggerAt: s.nowProvider().Add(d),
+		repeat:    repeat,
 	}
 	s.timerEntries[entryName] = entry
 	heap.Push(s.queue, entry)

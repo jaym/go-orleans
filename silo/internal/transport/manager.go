@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
@@ -32,7 +33,7 @@ func NewManager(log logr.Logger, handler TransportHandler) *Manager {
 
 type TransportHandler interface {
 	ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, payload []byte, promise InvokeMethodPromise)
-	ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, payload []byte, promise RegisterObserverPromise)
+	ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, payload []byte, registrationTimeout time.Duration, promise RegisterObserverPromise)
 	ReceiveObserverNotification(ctx context.Context, sender grain.Identity, receivers []grain.Identity, observableType string, name string, payload []byte)
 	ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, promise UnsubscribeObserverPromise)
 }
@@ -229,7 +230,7 @@ func (h *managedTransportInternal) ReceiveInvokeMethodRequest(ctx context.Contex
 	h.TransportHandler.ReceiveInvokeMethodRequest(ctx, sender, receiver, method, payload, p)
 }
 
-func (h *managedTransportInternal) ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte) {
+func (h *managedTransportInternal) ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte, opts cluster.EnqueueRegisterObserverRequestOptions) {
 	p := observerFuncPromise{f: func(errOut []byte) {
 		if err := h.transport.EnqueueAckRegisterObserver(context.TODO(), observer, uuid, errOut); err != nil {
 			h.log.V(0).Error(err, "failed to response to ack observer registration",
@@ -239,7 +240,7 @@ func (h *managedTransportInternal) ReceiveRegisterObserverRequest(ctx context.Co
 				"uuid", uuid)
 		}
 	}}
-	h.TransportHandler.ReceiveRegisterObserverRequest(ctx, observer, observable, name, payload, p)
+	h.TransportHandler.ReceiveRegisterObserverRequest(ctx, observer, observable, name, payload, opts.RegistrationTimeout, p)
 }
 
 func (h *managedTransportInternal) ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string) {
@@ -333,14 +334,16 @@ func (m *Manager) InvokeMethod(ctx context.Context, sender grain.Identity, recei
 	return f, nil
 }
 
-func (m *Manager) RegisterObserver(ctx context.Context, observer grain.Identity, observable cluster.GrainAddress, name string, uuid string, payload []byte) (RegisterObserverFuture, error) {
+func (m *Manager) RegisterObserver(ctx context.Context, observer grain.Identity, observable cluster.GrainAddress, name string, uuid string, payload []byte, registrationTimeout time.Duration) (RegisterObserverFuture, error) {
 	t, err := m.getTransport(observable.Location)
 	if err != nil {
 		return nil, err
 	}
 
 	f := t.internal.registerRegisterObserverPromise(uuid)
-	if err := t.internal.transport.EnqueueRegisterObserverRequest(ctx, observer, observable.Identity, name, uuid, payload); err != nil {
+	if err := t.internal.transport.EnqueueRegisterObserverRequest(ctx, observer, observable.Identity, name, uuid, payload, cluster.EnqueueRegisterObserverRequestOptions{
+		RegistrationTimeout: registrationTimeout,
+	}); err != nil {
 		// TODO: if an error is returned, its possible that we never resolved the promise
 		return nil, err
 	}

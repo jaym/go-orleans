@@ -2,6 +2,7 @@ package activation
 
 import (
 	"context"
+	"time"
 
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/silo/services/observer"
@@ -11,10 +12,11 @@ import (
 type EncodedRegisteredObserver struct {
 	grain.Identity
 	observableName string
+	expiresAt      time.Time
 	val            []byte
 }
 
-func NewRegisteredObserver(identity grain.Identity, observableName string, val interface{}) (*EncodedRegisteredObserver, error) {
+func NewRegisteredObserver(identity grain.Identity, observableName string, expiresAt time.Time, val interface{}) (*EncodedRegisteredObserver, error) {
 	// TODO: should not need to marshal
 	data, err := proto.Marshal(val.(proto.Message))
 	if err != nil {
@@ -23,6 +25,7 @@ func NewRegisteredObserver(identity grain.Identity, observableName string, val i
 	return &EncodedRegisteredObserver{
 		Identity:       identity,
 		observableName: observableName,
+		expiresAt:      expiresAt,
 		val:            data,
 	}, nil
 }
@@ -33,6 +36,10 @@ func (o *EncodedRegisteredObserver) Get(v interface{}) error {
 
 func (o *EncodedRegisteredObserver) ObservableName() string {
 	return o.observableName
+}
+
+func (o *EncodedRegisteredObserver) ExpiresAt() time.Time {
+	return o.expiresAt
 }
 
 type grainObserverManager struct {
@@ -77,22 +84,44 @@ func (m *grainObserverManager) List(ctx context.Context, observableName string) 
 		return nil, err
 	}
 
-	return m.registeredObservers[observableName], nil
+	persistedObservers := m.registeredObservers[observableName]
+	observers := make([]grain.RegisteredObserver, 0, len(persistedObservers))
+	now := time.Now()
+	changed := false
+	for _, o := range persistedObservers {
+		if now.Before(o.ExpiresAt()) {
+			changed = true
+			observers = append(observers, o)
+		}
+	}
+	if changed {
+		observersCopy := make([]grain.RegisteredObserver, len(observers))
+		copy(observersCopy, observers)
+
+		m.registeredObservers[observableName] = observersCopy
+	}
+
+	return observers, nil
 }
 
-func (m *grainObserverManager) Add(ctx context.Context, observableName string, identity grain.Identity, val proto.Message) (grain.RegisteredObserver, error) {
+func (m *grainObserverManager) Add(ctx context.Context, observableName string, identity grain.Identity, registrationTimeout time.Duration, val proto.Message) (grain.RegisteredObserver, error) {
 	if err := m.ensureLoaded(ctx); err != nil {
 		return nil, err
 	}
 
-	o, err := NewRegisteredObserver(identity, observableName, val)
+	var expiresAt time.Time
+	if registrationTimeout != 0 {
+		expiresAt = time.Now().Add(registrationTimeout)
+	}
+
+	o, err := NewRegisteredObserver(identity, observableName, expiresAt, val)
 	if err != nil {
 		return nil, err
 	}
 	observables := m.registeredObservers[observableName]
 	for i := range observables {
 		if observables[i].GetIdentity() == identity {
-			err := m.store.Add(ctx, m.owner, observableName, identity, observer.AddWithVal(val))
+			err := m.store.Add(ctx, m.owner, observableName, identity, observer.AddWithVal(val), observer.AddWithExpiration(expiresAt))
 			if err != nil {
 				return nil, err
 			}
@@ -102,7 +131,7 @@ func (m *grainObserverManager) Add(ctx context.Context, observableName string, i
 		}
 	}
 
-	if err := m.store.Add(ctx, m.owner, observableName, identity, observer.AddWithVal(val)); err != nil {
+	if err := m.store.Add(ctx, m.owner, observableName, identity, observer.AddWithVal(val), observer.AddWithExpiration(expiresAt)); err != nil {
 		return nil, err
 	}
 	m.registeredObservers[observableName] = append(m.registeredObservers[observableName], o)
@@ -136,7 +165,7 @@ func (m *grainObserverManager) Remove(ctx context.Context, observableName string
 	}
 
 	if idx >= 0 {
-		lastIdx := len(observersForObservable)
+		lastIdx := len(observersForObservable) - 1
 		observersForObservable[idx] = observersForObservable[lastIdx]
 		m.registeredObservers[observableName] = observersForObservable[:lastIdx]
 	}
@@ -149,8 +178,12 @@ func (m *grainObserverManager) Notify(ctx context.Context, observableName string
 	}
 
 	receivers := make([]grain.Identity, len(observers))
+
+	now := time.Now()
 	for i := range observers {
-		receivers[i] = observers[i].GetIdentity()
+		if now.Before(observers[i].ExpiresAt()) {
+			receivers[i] = observers[i].GetIdentity()
+		}
 	}
 	return m.siloClient.NotifyObservers(ctx, m.owner.GrainType, observableName, receivers, val)
 }

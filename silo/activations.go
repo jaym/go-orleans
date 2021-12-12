@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
@@ -31,12 +32,13 @@ type InvokeMethodRequest struct {
 }
 
 type RegisterObserverRequest struct {
-	Observer    grain.Identity
-	Observable  grain.Identity
-	Name        string
-	UUID        string
-	In          []byte
-	ResolveFunc func(error)
+	Observer            grain.Identity
+	Observable          grain.Identity
+	Name                string
+	UUID                string
+	In                  []byte
+	ResolveFunc         func(error)
+	RegistrationTimeout time.Duration
 }
 
 type UnsubscribeObserverRequest struct {
@@ -159,7 +161,7 @@ func (m *GrainActivationManagerImpl) EnqueueRegisterObserverRequest(req Register
 		return err
 	}
 
-	return activation.RegisterObserver(req.Observer, req.Name, req.In, req.ResolveFunc)
+	return activation.RegisterObserver(req.Observer, req.Name, req.In, req.RegistrationTimeout, req.ResolveFunc)
 }
 
 func (m *GrainActivationManagerImpl) EnqueueUnsubscribeObserverRequest(req UnsubscribeObserverRequest) error {

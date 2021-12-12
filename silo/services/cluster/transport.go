@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"time"
 
 	"github.com/jaym/go-orleans/grain"
 )
@@ -14,7 +15,7 @@ type TransportHandler interface {
 	ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, uuid string, payload []byte)
 	ReceiveInvokeMethodResponse(ctx context.Context, receiver grain.Identity, uuid string, payload []byte, err []byte)
 
-	ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte)
+	ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte, opts EnqueueRegisterObserverRequestOptions)
 	ReceiveAckRegisterObserver(ctx context.Context, receiver grain.Identity, uuid string, errOut []byte)
 	ReceiveObserverNotification(ctx context.Context, sender grain.Identity, receivers []grain.Identity, observableType string, name string, payload []byte)
 
@@ -24,6 +25,10 @@ type TransportHandler interface {
 
 type StopFunc func() error
 
+type EnqueueRegisterObserverRequestOptions struct {
+	RegistrationTimeout time.Duration
+}
+
 type Transport interface {
 	Listen(TransportHandler) error
 	Stop() error
@@ -31,7 +36,7 @@ type Transport interface {
 	EnqueueInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, uuid string, payload []byte) error
 	EnqueueInvokeMethodResponse(ctx context.Context, receiver grain.Identity, uuid string, payload []byte, err []byte) error
 
-	EnqueueRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte) error
+	EnqueueRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte, opts EnqueueRegisterObserverRequestOptions) error
 	EnqueueAckRegisterObserver(ctx context.Context, receiver grain.Identity, uuid string, errOut []byte) error
 	EnqueueObserverNotification(ctx context.Context, sender grain.Identity, receivers []grain.Identity, observableType string, name string, payload []byte) error
 

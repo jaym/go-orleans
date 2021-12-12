@@ -2,6 +2,7 @@ package silo
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
@@ -39,12 +40,13 @@ func (s siloTransportHandler) ReceiveInvokeMethodRequest(ctx context.Context, se
 	}
 }
 
-func (s siloTransportHandler) ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, payload []byte, promise transport.RegisterObserverPromise) {
+func (s siloTransportHandler) ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, payload []byte, registrationTimeout time.Duration, promise transport.RegisterObserverPromise) {
 	err := s.localGrainManager.EnqueueRegisterObserverRequest(RegisterObserverRequest{
-		Observer:   observer,
-		Observable: observable,
-		Name:       name,
-		In:         payload,
+		Observer:            observer,
+		Observable:          observable,
+		Name:                name,
+		In:                  payload,
+		RegistrationTimeout: registrationTimeout,
 		ResolveFunc: func(e error) {
 			if e != nil {
 				promise.Resolve(encodeError(ctx, e))
@@ -122,8 +124,8 @@ func (t *localTransport) EnqueueInvokeMethodRequest(ctx context.Context, sender 
 	return nil
 }
 
-func (t *localTransport) EnqueueRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte) error {
-	t.h.ReceiveRegisterObserverRequest(ctx, observer, observable, name, uuid, payload)
+func (t *localTransport) EnqueueRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte, opts cluster.EnqueueRegisterObserverRequestOptions) error {
+	t.h.ReceiveRegisterObserverRequest(ctx, observer, observable, name, uuid, payload, opts)
 	return nil
 }
 
