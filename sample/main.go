@@ -238,6 +238,11 @@ func main() {
 	<-stop
 	close(closeChan)
 
+	err = s.DestroyGrain(subscriber)
+	if err != nil {
+		panic(err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := s.Stop(ctx); err != nil {

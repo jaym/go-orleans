@@ -149,6 +149,9 @@ func (g *Grain) Deactivate(ctx context.Context) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
+	// TODO: asser that this method is only called by the runtime
+	// users should use silo.DestroyGrain
+
 	for _, s := range g.streams {
 		close(s.done)
 		// TODO: what should happen with this error
@@ -183,6 +186,7 @@ func key(observableType string, observableName string) string {
 
 type stream struct {
 	l              sync.Mutex
+	destroyed      bool
 	g              *Grain
 	c              chan Message
 	done           chan struct{}
@@ -196,6 +200,7 @@ func (s *stream) Done() <-chan struct{} {
 }
 
 func (s *stream) Close(ctx context.Context) error {
+	// TODO: the lock should probably be held for this entire operation
 	s.g.deleteStream(key(s.observableType, s.observableName))
 
 	return s.destroy(ctx)
@@ -204,6 +209,10 @@ func (s *stream) Close(ctx context.Context) error {
 func (s *stream) destroy(ctx context.Context) error {
 	s.l.Lock()
 	defer s.l.Unlock()
+	if s.destroyed {
+		return nil
+	}
+	s.destroyed = true
 
 	futures := make([]grain.UnsubscribeObserverFuture, len(s.observables))
 	for i, o := range s.observables {
