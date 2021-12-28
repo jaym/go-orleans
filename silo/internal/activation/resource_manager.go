@@ -2,13 +2,14 @@ package activation
 
 import (
 	"container/list"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/jaym/go-orleans/grain"
 )
 
-type EvictTrigger func(identityes []grain.Identity)
+type EvictTrigger func(ident grain.Identity, onComplete func(error))
 
 var ErrNoCapacity = errors.New("No capacity")
 
@@ -105,9 +106,13 @@ func (r *ResourceManager) Remove(grainAddr grain.Identity) error {
 
 func (r *ResourceManager) start() {
 	go func() {
-		for identesesToEvict := range r.evictChan {
-			r.evictTrigger(identesesToEvict)
-			time.Sleep(1 * time.Second)
+		for idents := range r.evictChan {
+			wg := sync.WaitGroup{}
+			wg.Add(len(idents))
+			for _, ident := range idents {
+				r.evictTrigger(ident, func(error) { wg.Done() })
+			}
+			wg.Wait()
 		}
 	}()
 	go func() {
@@ -205,15 +210,15 @@ func (r *ResourceManager) evict() int {
 	}
 	numEvicted := 0
 	element := r.recencyList.Back()
-	identesesToEvict := make([]grain.Identity, 0, desiredEviction)
+	identsToEvict := make([]grain.Identity, 0, desiredEviction)
 	for element != nil && numEvicted < desiredEviction {
 		entry := element.Value.(*resourceManagerEntry)
-		identesesToEvict = append(identesesToEvict, entry.grainAddr)
+		identsToEvict = append(identsToEvict, entry.grainAddr)
 		numEvicted++
 		element = element.Prev()
 	}
 	select {
-	case r.evictChan <- identesesToEvict:
+	case r.evictChan <- identsToEvict:
 		return numEvicted
 	default:
 		return 0

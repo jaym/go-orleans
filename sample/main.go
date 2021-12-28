@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
@@ -212,8 +213,7 @@ func main() {
 						return
 					default:
 					}
-					//i := rand.Intn(64)
-					i := 2
+					i := rand.Intn(64)
 					gident := grain.Identity{
 						GrainType: "ChirperGrain",
 						ID:        fmt.Sprintf("g%d", i),

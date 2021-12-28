@@ -19,10 +19,6 @@ import (
 	"github.com/jaym/go-orleans/silo/services/timer"
 )
 
-type EvictGrainRequest struct {
-	Identity grain.Identity
-}
-
 type InvokeMethodRequest struct {
 	Sender      grain.Identity
 	Receiver    grain.Identity
@@ -99,13 +95,7 @@ func NewGrainActivationManager(
 		grainActivations: make(map[grain.Identity]*activation.LocalGrainActivation),
 		grainDirectory:   grainDirectory,
 	}
-	m.resourceManager = activation.NewResourceManager(8, func(identityes []grain.Identity) {
-		for _, a := range identityes {
-			m.EnqueueEvictGrain(EvictGrainRequest{
-				Identity: a,
-			})
-		}
-	})
+	m.resourceManager = activation.NewResourceManager(8, m.EnqueueEvictGrain)
 
 	return m
 }
@@ -218,15 +208,17 @@ func (m *GrainActivationManagerImpl) EnqueueTimerTrigger(req TimerTriggerNotific
 	return activation.NotifyTimer(req.Name)
 }
 
-func (m *GrainActivationManagerImpl) EnqueueEvictGrain(req EvictGrainRequest) error {
-	activation, err := m.getActivation(req.Identity, false)
+func (m *GrainActivationManagerImpl) EnqueueEvictGrain(ident grain.Identity, onComplete func(error)) {
+	activation, err := m.getActivation(ident, false)
 	if err != nil {
 		if errors.Is(err, ErrGrainActivationNotFound) {
-			return nil
+			onComplete(nil)
+			return
 		}
-		return err
+		onComplete(err)
+		return
 	}
-	return activation.Evict()
+	activation.EvictAsync(onComplete)
 }
 
 func (m *GrainActivationManagerImpl) Stop(ctx context.Context) error {
@@ -244,9 +236,7 @@ func (m *GrainActivationManagerImpl) Stop(ctx context.Context) error {
 
 	m.lock.Lock()
 	for _, g := range m.grainActivations {
-		if err := g.Stop(); err != nil {
-			m.log.Error(err, "failed to stop grain", "grain", g.Name())
-		}
+		g.StopAsync(func(error) {})
 	}
 	m.lock.Unlock()
 

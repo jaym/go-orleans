@@ -71,14 +71,16 @@ type grainActivationMessage struct {
 }
 
 type grainActivationEvict struct {
-	mustStop bool
+	mustStop   bool
+	onComplete func(error)
 }
 
 type grainState int
 
 const (
 	grainStateRun grainState = iota
-	grainStateDeactivate
+	grainStateDeactivating
+	grainStateDeactivated
 )
 
 type LocalGrainActivation struct {
@@ -195,25 +197,23 @@ func (l *LocalGrainActivation) loop(ctx context.Context) {
 		siloClient:         l.grainActivator.siloClient,
 	}
 
-	defer l.grainActivator.deactivateCallback(l.identity)
-
 	if err := l.grainActivator.resourceManager.Touch(l.identity); err != nil {
-		l.setStateDeactivate()
-		l.drain(ctx, ErrNoCapacity)
+		l.setStateDeactivating()
+		l.shutdown(ctx, ErrNoCapacity)
 		return
 	}
 
 	activation, err := l.description.Activation.Handler(l.activator, ctx, coreServices, observerManager, l.identity)
 	if err != nil {
-		l.setStateDeactivate()
-		l.drain(ctx, err)
+		l.setStateDeactivating()
+		l.shutdown(ctx, err)
 		return
 	}
 LOOP:
 	for {
 		select {
 		case req := <-l.evictChan:
-			if l.evict(ctx, activation, req.mustStop) {
+			if l.evict(ctx, activation, req.mustStop, req.onComplete) {
 				break LOOP
 			}
 		default:
@@ -221,7 +221,7 @@ LOOP:
 
 		select {
 		case req := <-l.evictChan:
-			if l.evict(ctx, activation, req.mustStop) {
+			if l.evict(ctx, activation, req.mustStop, req.onComplete) {
 				break LOOP
 			}
 		case msg := <-l.inbox:
@@ -230,26 +230,35 @@ LOOP:
 	}
 }
 
-func (l *LocalGrainActivation) setStateDeactivate() {
+func (l *LocalGrainActivation) setStateDeactivating() {
 	l.lock.Lock()
-	l.grainState = grainStateDeactivate
+	l.grainState = grainStateDeactivating
 	close(l.inbox)
+	close(l.evictChan)
 	l.lock.Unlock()
 }
 
-func (l *LocalGrainActivation) evict(ctx context.Context, activation grain.GrainReference, mustStop bool) bool {
+func (l *LocalGrainActivation) setStateDeactivated() {
+	l.lock.Lock()
+	l.grainState = grainStateDeactivated
+	l.lock.Unlock()
+}
+
+func (l *LocalGrainActivation) evict(ctx context.Context, activation grain.GrainReference, mustStop bool, onComplete func(error)) bool {
 	canEvict := true
 	if hasCanEvict, ok := activation.(HasCanEvict); ok {
 		canEvict = hasCanEvict.CanEvict(ctx)
 	}
 	if canEvict || mustStop {
-		l.setStateDeactivate()
+		l.setStateDeactivating()
 		if hasDeactivate, ok := activation.(HasDeactivate); ok {
 			hasDeactivate.Deactivate(ctx)
 		}
-		l.drain(ctx, ErrGrainDeactivating)
+		l.shutdown(ctx, ErrGrainDeactivating)
+		onComplete(nil)
 		return true
 	}
+	onComplete(ErrGrainDeactivationRefused)
 	return false
 }
 
@@ -318,7 +327,7 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 	}
 }
 
-func (l *LocalGrainActivation) drain(ctx context.Context, err error) {
+func (l *LocalGrainActivation) shutdown(ctx context.Context, err error) {
 	for msg := range l.inbox {
 		switch msg.messageType {
 		case invokeMethod:
@@ -334,6 +343,14 @@ func (l *LocalGrainActivation) drain(ctx context.Context, err error) {
 		case triggerTimer:
 		}
 	}
+
+	l.grainActivator.deactivateCallback(l.identity)
+
+	for msg := range l.evictChan {
+		msg.onComplete(nil)
+	}
+
+	l.setStateDeactivated()
 }
 
 func (l *LocalGrainActivation) InvokeMethod(sender grain.Identity, method string, payload []byte, resolve func(out interface{}, err error)) error {
@@ -393,36 +410,43 @@ func (l *LocalGrainActivation) NotifyTimer(name string) error {
 	})
 }
 
-func (l *LocalGrainActivation) Evict() error {
+func (l *LocalGrainActivation) EvictAsync(onComplete func(err error)) {
 	l.lock.RLock()
 	defer l.lock.RUnlock()
-	if l.grainState == grainStateDeactivate {
-		return nil
-	}
-
-	select {
-	case l.evictChan <- grainActivationEvict{}:
-	default:
-		return ErrInboxFull
-	}
-	return nil
-}
-
-func (l *LocalGrainActivation) Stop() error {
-	l.lock.RLock()
-	defer l.lock.RUnlock()
-	if l.grainState == grainStateDeactivate {
-		return nil
+	if l.grainState >= grainStateDeactivating {
+		// TODO: this is not completely correct. onComplete should be called as the last
+		// thing the grain does, so it really should wait until the grain state is
+		// grainStateDeactivated
+		onComplete(nil)
+		return
 	}
 
 	select {
 	case l.evictChan <- grainActivationEvict{
-		mustStop: true,
+		mustStop:   false,
+		onComplete: onComplete,
 	}:
 	default:
-		return ErrInboxFull
+		onComplete(ErrInboxFull)
 	}
-	return nil
+}
+
+func (l *LocalGrainActivation) StopAsync(onComplete func(error)) {
+	l.lock.RLock()
+	defer l.lock.RUnlock()
+	if l.grainState >= grainStateDeactivating {
+		onComplete(nil)
+		return
+	}
+
+	select {
+	case l.evictChan <- grainActivationEvict{
+		mustStop:   true,
+		onComplete: onComplete,
+	}:
+	default:
+		onComplete(ErrInboxFull)
+	}
 }
 
 func (l *LocalGrainActivation) Name() string {
@@ -433,7 +457,7 @@ func (l *LocalGrainActivation) pushInbox(msg grainActivationMessage) error {
 	l.lock.RLock()
 	defer l.lock.RUnlock()
 
-	if l.grainState == grainStateDeactivate {
+	if l.grainState >= grainStateDeactivating {
 		return ErrGrainDeactivating
 	}
 
@@ -448,3 +472,4 @@ func (l *LocalGrainActivation) pushInbox(msg grainActivationMessage) error {
 var ErrInboxFull = errors.New("inbox full")
 var ErrGrainActivationNotFound = errors.New("grain activation not found")
 var ErrGrainDeactivating = errors.New("grain is deactivating")
+var ErrGrainDeactivationRefused = errors.New("grain deactivation refused")

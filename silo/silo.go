@@ -158,9 +158,9 @@ func (s *Silo) CreateGrain() (*generic.Grain, error) {
 }
 
 func (s *Silo) DestroyGrain(g *generic.Grain) error {
-	return s.localGrainManager.EnqueueEvictGrain(EvictGrainRequest{
-		Identity: g.Identity,
-	})
+	errChan := make(chan error, 1)
+	s.localGrainManager.EnqueueEvictGrain(g.Identity, func(e error) { errChan <- e })
+	return <-errChan
 }
 
 func (s *Silo) Stop(ctx context.Context) error {
