@@ -34,7 +34,9 @@ type Silo struct {
 }
 
 func NewSilo(log logr.Logger, observerStore observer.Store, opts ...SiloOption) *Silo {
-	options := siloOptions{}
+	options := siloOptions{
+		maxGrains: 1024,
+	}
 	for _, o := range opts {
 		o(&options)
 	}
@@ -79,7 +81,9 @@ func NewSilo(log logr.Logger, observerStore observer.Store, opts ...SiloOption) 
 		s.client,
 		s.timerService,
 		s.observerStore,
-		s.grainDirectory)
+		s.grainDirectory,
+		options.maxGrains,
+	)
 
 	handler := siloTransportHandler{
 		log:               s.log.WithName("transport-handler"),

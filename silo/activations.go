@@ -84,6 +84,7 @@ func NewGrainActivationManager(
 	timerService timer.TimerService,
 	observerStore observer.Store,
 	grainDirectory cluster.GrainDirectory,
+	maxGrains int,
 ) *GrainActivationManagerImpl {
 	m := &GrainActivationManagerImpl{
 		log:              log,
@@ -95,7 +96,7 @@ func NewGrainActivationManager(
 		grainActivations: make(map[grain.Identity]*activation.LocalGrainActivation),
 		grainDirectory:   grainDirectory,
 	}
-	m.resourceManager = activation.NewResourceManager(8, m.EnqueueEvictGrain)
+	m.resourceManager = activation.NewResourceManager(maxGrains, m.EnqueueEvictGrain)
 
 	return m
 }

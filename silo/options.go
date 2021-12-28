@@ -13,6 +13,7 @@ type siloOptions struct {
 	membershipProtocol cluster.MembershipProtocol
 	transportFactory   cluster.TransportFactory
 	discovery          cluster.Discovery
+	maxGrains          int
 }
 
 func (so *siloOptions) NodeName() cluster.Location {
@@ -75,5 +76,11 @@ func WithMembership(m cluster.MembershipProtocol, transportFactory cluster.Trans
 func WithDiscovery(d cluster.Discovery) SiloOption {
 	return func(so *siloOptions) {
 		so.discovery = d
+	}
+}
+
+func WithMaxGrains(maxGrains int) SiloOption {
+	return func(so *siloOptions) {
+		so.maxGrains = maxGrains
 	}
 }
