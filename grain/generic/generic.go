@@ -16,15 +16,17 @@ import (
 	"github.com/jaym/go-orleans/grain/services"
 )
 
-var ErrStreamInboxFull = errors.New("stream inbox full")
-var ErrObservableAlreadyRegistered = errors.New("observable already registered")
-var ErrNoHandler = errors.New("no handler for notification")
-
-var GenericGrainType = "GenericGrain"
-
 type decoderFunc = func(in interface{}) error
 
+var (
+	ErrStreamInboxFull             = errors.New("stream inbox full")
+	ErrObservableAlreadyRegistered = errors.New("observable already registered")
+	ErrNoHandler                   = errors.New("no handler for notification")
+)
+
 const (
+	GenericGrainType = "GenericGrain"
+
 	registrationTimeout         = 3 * time.Minute
 	registrationRefreshInterval = time.Second
 )

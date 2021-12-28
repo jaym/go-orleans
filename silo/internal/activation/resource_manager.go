@@ -52,9 +52,9 @@ type ResourceManager struct {
 	nowProvider  func() time.Time
 	evictTrigger EvictTrigger
 
-	capacity     int
-	used         int
-	evictionRate float32
+	capacity           int
+	used               int
+	wantedMinAvailable float32
 
 	recencyList *list.List
 	grains      map[grain.Identity]*resourceManagerEntry
@@ -62,19 +62,21 @@ type ResourceManager struct {
 
 	ctlChan   chan resourceManagerCtlMsg
 	evictChan chan []grain.Identity
+
+	ignoredGrainTypes []string
 }
 
 func NewResourceManager(capacity int, evictTrigger EvictTrigger) *ResourceManager {
 	return &ResourceManager{
-		nowProvider:  time.Now,
-		evictTrigger: evictTrigger,
-		capacity:     capacity,
-		evictionRate: 0.2,
-		recencyList:  list.New(),
-		grains:       make(map[grain.Identity]*resourceManagerEntry),
-		ctlChan:      make(chan resourceManagerCtlMsg, 512),
-		evictChan:    make(chan []grain.Identity),
-		retryList:    make([]retryEntry, 0, 32),
+		nowProvider:        time.Now,
+		evictTrigger:       evictTrigger,
+		capacity:           capacity,
+		wantedMinAvailable: 0.2,
+		recencyList:        list.New(),
+		grains:             make(map[grain.Identity]*resourceManagerEntry),
+		ctlChan:            make(chan resourceManagerCtlMsg, 512),
+		evictChan:          make(chan []grain.Identity),
+		retryList:          make([]retryEntry, 0, 32),
 	}
 }
 
@@ -82,7 +84,19 @@ func (r *ResourceManager) Start() {
 	r.start()
 }
 
+func (r *ResourceManager) isIgnored(grainAddr grain.Identity) bool {
+	for _, ignored := range r.ignoredGrainTypes {
+		if ignored == grainAddr.GrainType {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *ResourceManager) Touch(grainAddr grain.Identity) error {
+	if r.isIgnored(grainAddr) {
+		return nil
+	}
 	respChan := make(chan error, 1)
 	r.ctlChan <- resourceManagerCtlMsg{
 		msgType: resourceManagerTouchMsgType,
@@ -95,6 +109,9 @@ func (r *ResourceManager) Touch(grainAddr grain.Identity) error {
 }
 
 func (r *ResourceManager) Remove(grainAddr grain.Identity) error {
+	if r.isIgnored(grainAddr) {
+		return nil
+	}
 	respChan := make(chan error, 1)
 	r.ctlChan <- resourceManagerCtlMsg{
 		msgType: resourceManagerRemoveMsgType,
@@ -206,7 +223,7 @@ func (r *ResourceManager) touch(grainAddr grain.Identity) error {
 }
 
 func (r *ResourceManager) evict() int {
-	desiredFree := int(r.evictionRate * float32(r.capacity))
+	desiredFree := int(r.wantedMinAvailable * float32(r.capacity))
 	freeCapacity := r.capacity - r.used
 	desiredEviction := desiredFree - freeCapacity
 	if desiredEviction <= 0 {
