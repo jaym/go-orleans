@@ -52,8 +52,9 @@ type ResourceManager struct {
 	nowProvider  func() time.Time
 	evictTrigger EvictTrigger
 
-	capacity int
-	used     int
+	capacity     int
+	used         int
+	evictionRate float32
 
 	recencyList *list.List
 	grains      map[grain.Identity]*resourceManagerEntry
@@ -68,6 +69,7 @@ func NewResourceManager(capacity int, evictTrigger EvictTrigger) *ResourceManage
 		nowProvider:  time.Now,
 		evictTrigger: evictTrigger,
 		capacity:     capacity,
+		evictionRate: 0.2,
 		recencyList:  list.New(),
 		grains:       make(map[grain.Identity]*resourceManagerEntry),
 		ctlChan:      make(chan resourceManagerCtlMsg, 512),
@@ -204,7 +206,9 @@ func (r *ResourceManager) touch(grainAddr grain.Identity) error {
 }
 
 func (r *ResourceManager) evict() int {
-	desiredEviction := r.used - int(0.2*float32(r.capacity))
+	desiredFree := int(r.evictionRate * float32(r.capacity))
+	freeCapacity := r.capacity - r.used
+	desiredEviction := desiredFree - freeCapacity
 	if desiredEviction <= 0 {
 		return 0
 	}
