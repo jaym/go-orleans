@@ -3,6 +3,7 @@ package internal
 import (
 	"database/sql"
 	"embed"
+	"errors"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
@@ -29,6 +30,9 @@ func Migrate(db *sql.DB) error {
 	}
 
 	if err := m.Up(); err != nil {
+		if errors.Is(err, migrate.ErrNoChange) {
+			return nil
+		}
 		return err
 	}
 

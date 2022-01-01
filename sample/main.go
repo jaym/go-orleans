@@ -3,27 +3,20 @@ package main
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
-	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zerologr"
 	_ "github.com/jackc/pgx/v4/stdlib"
 	examples "github.com/jaym/go-orleans/examples/proto"
 	"github.com/jaym/go-orleans/grain"
-	"github.com/jaym/go-orleans/plugins/codec/protobuf"
 	"github.com/jaym/go-orleans/plugins/discovery/static"
-	graindir_psql "github.com/jaym/go-orleans/plugins/graindir/psql"
-	"github.com/jaym/go-orleans/plugins/membership/memberlist"
-	"github.com/jaym/go-orleans/plugins/observers/psql"
-	observer_psql "github.com/jaym/go-orleans/plugins/observers/psql"
-	"github.com/jaym/go-orleans/plugins/transport/grpc"
+	psql_quicksetup "github.com/jaym/go-orleans/quicksetup/psql"
 	"github.com/jaym/go-orleans/silo"
-	"github.com/jaym/go-orleans/silo/services/cluster"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 )
@@ -110,56 +103,30 @@ func main() {
 		panic("wrong")
 	}
 
-	if os.Getenv("START_PG") == "true" {
-		database := embeddedpostgres.NewDatabase()
-		if err := database.Start(); err != nil {
-			panic(err)
-		}
-		defer func() {
-			if err := database.Stop(); err != nil {
-			}
-		}()
-	}
-
-	poolObservers, err := setupDatabase(context.Background(), "observers", observer_psql.SetupDatabase)
-	if err != nil {
-		panic(err)
-	}
-
-	poolGrainDir, err := setupDatabase(context.Background(), "graindir", graindir_psql.SetupDatabase)
-	if err != nil {
-		panic(err)
-	}
-
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
 	zerologr.NameFieldName = "logger"
 	zerologr.NameSeparator = "/"
+	zl := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger().Level(zerolog.DebugLevel)
+	log := zerologr.New(&zl)
 
-	zl := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr})
-	zl = zl.With().Timestamp().Logger()
-	var log logr.Logger = zerologr.New(&zl)
+	nodeName := os.Args[1]
 
-	observerStore := observer_psql.NewObserverStore(log.WithName("observerstore"), poolObservers, psql.WithCodec(protobuf.NewCodec()))
-	d := static.New([]string{"127.0.0.1:9991", "127.0.0.1:9992"})
-
-	grainDir := graindir_psql.NewGrainDirectory(log.WithName("graindir"), poolGrainDir)
-
-	orlServer, err := grpc.New(log.WithName("grpc"), os.Args[1], fmt.Sprintf("127.0.0.1:%d", rpcPort))
+	s, err := psql_quicksetup.Setup(
+		context.Background(),
+		psql_quicksetup.WithLogr(log),
+		psql_quicksetup.WithNodeName(nodeName),
+		psql_quicksetup.WithPGEnvironment(),
+		psql_quicksetup.WithRPCAddr("127.0.0.1:"+strconv.Itoa(rpcPort)),
+		psql_quicksetup.WithMembershipAddr("127.0.0.1:"+strconv.Itoa(membershipPort)),
+		psql_quicksetup.WithSiloOptions(
+			silo.WithDiscovery(static.New([]string{"127.0.0.1:9991", "127.0.0.1:9992"})),
+			silo.WithMaxGrains(10),
+		),
+	)
 	if err != nil {
 		panic(err)
 	}
-	if err := orlServer.Start(); err != nil {
-		panic(err)
-	}
 
-	mp := memberlist.New(log, cluster.Location(os.Args[1]), membershipPort, rpcPort)
-	s := silo.NewSilo(log, observerStore, silo.WithNodeName(os.Args[1]),
-		silo.WithNodeName(os.Args[1]),
-		silo.WithDiscovery(d),
-		silo.WithMembership(mp, orlServer),
-		silo.WithGrainDirectory(grainDir),
-		silo.WithMaxGrains(10),
-	)
 	examples.RegisterChirperGrainActivator(s, &ChirperGrainActivatorTestImpl{})
 	if err := s.Start(context.Background()); err != nil {
 		panic(err)
@@ -215,7 +182,8 @@ func main() {
 						return
 					default:
 					}
-					i := rand.Intn(64)
+					//i := rand.Intn(64)
+					i := 2
 					gident := grain.Identity{
 						GrainType: "ChirperGrain",
 						ID:        fmt.Sprintf("g%d", i),

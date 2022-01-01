@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -38,15 +36,24 @@ type node struct {
 
 func New(log logr.Logger, nodeName string, listenAddress string) (*TransportServer, error) {
 	// TODO: listenAddress should be decoupled from the advertised address
-	parts := strings.Split(listenAddress, ":")
-	if len(parts) != 2 {
-		return nil, errors.New("invalid listen address")
-	}
-	ip := parts[0]
-	port, err := strconv.ParseUint(parts[1], 10, 16)
+
+	addr, err := net.ResolveTCPAddr("", listenAddress)
 	if err != nil {
 		return nil, err
 	}
+
+	if addr.IP == nil {
+		// TODO: this is not the correct way to handle this situation.
+		// The transport needs to know how to address this node so that
+		// it can tell other nodes how to connect to it. Or that requirement
+		// is removed and that information is retrieved from the membership
+		// protocol
+		panic("ip is nil")
+	}
+
+	ip := addr.IP.String()
+	port := addr.Port
+
 	return &TransportServer{
 		log:           log,
 		transports:    make(map[string]*transport, 16),
