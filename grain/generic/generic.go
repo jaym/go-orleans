@@ -27,8 +27,8 @@ var (
 const (
 	GenericGrainType = "GenericGrain"
 
-	registrationTimeout         = 3 * time.Minute
-	registrationRefreshInterval = time.Second
+	registrationRefreshInterval = time.Minute
+	registrationTimeout         = 3 * registrationRefreshInterval
 )
 
 var Descriptor = descriptor.GrainDescription{
