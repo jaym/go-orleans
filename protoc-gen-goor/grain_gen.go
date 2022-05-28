@@ -171,7 +171,7 @@ func writeGrainObservableStream(g *protogen.GeneratedFile, m *protogen.Method, o
 	g.P()
 	g.P("stream := &", streamName, "{")
 	g.P("  Stream: genericStream,")
-	g.P("  c: make(chan ", streamMessageName, "),")
+	g.P("  c: make(chan ", streamMessageName, ",10),")
 	g.P("}")
 	g.P()
 	g.P("go func() {")
@@ -191,8 +191,9 @@ func writeGrainObservableStream(g *protogen.GeneratedFile, m *protogen.Method, o
 	g.P("        m.Value = val")
 	g.P("      }")
 	g.P("      select {")
+	g.P("        case <-stream.Stream.Done():")
+	g.P("          return")
 	g.P("      case stream.c <- m:")
-	g.P("      default:")
 	g.P("      }")
 	g.P("    }")
 	g.P("  }")
@@ -341,7 +342,7 @@ func writeGrainServicesImplementation(g *protogen.GeneratedFile, svc *protogen.S
 			)
 			g.P("return m.observerManager.Notify(",
 				"ctx,",
-				"ChirperGrain_GrainDesc.Observables[", observerIdx, "].Name,",
+				svc.GoName, "Grain_GrainDesc.Observables[", observerIdx, "].Name,",
 				"observers, val)",
 			)
 			g.P("}")
@@ -353,7 +354,7 @@ func writeGrainServicesImplementation(g *protogen.GeneratedFile, svc *protogen.S
 			)
 			g.P("return m.observerManager.List(",
 				"ctx,",
-				"ChirperGrain_GrainDesc.Observables[", observerIdx, "].Name)",
+				svc.GoName, "Grain_GrainDesc.Observables[", observerIdx, "].Name)",
 			)
 			g.P("}")
 			g.P()
@@ -366,7 +367,7 @@ func writeGrainServicesImplementation(g *protogen.GeneratedFile, svc *protogen.S
 			)
 			g.P("_, err := m.observerManager.Add(",
 				"ctx,",
-				"ChirperGrain_GrainDesc.Observables[", observerIdx, "].Name,",
+				svc.GoName, "Grain_GrainDesc.Observables[", observerIdx, "].Name,",
 				"observer, registrationTimeout, req)",
 			)
 			g.P("return err")
@@ -379,7 +380,7 @@ func writeGrainServicesImplementation(g *protogen.GeneratedFile, svc *protogen.S
 			)
 			g.P("return m.observerManager.Remove(",
 				"ctx,",
-				"ChirperGrain_GrainDesc.Observables[", observerIdx, "].Name,",
+				svc.GoName, "Grain_GrainDesc.Observables[", observerIdx, "].Name,",
 				"observer)",
 			)
 			g.P("}")
@@ -621,7 +622,7 @@ func generateGrainClient(g *protogen.GeneratedFile, svc *protogen.Service) {
 	g.P("func Get", svc.GoName, "Grain(",
 		"siloClient ", g.QualifiedGoIdent(siloClientType), ", ",
 		"identity ", g.QualifiedGoIdent(identityType),
-		") ChirperGrainRef {",
+		")", svc.GoName, "GrainRef {",
 	)
 	g.P("return &", clientName(svc), "{")
 	g.P("Identity: identity,")
