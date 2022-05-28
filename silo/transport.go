@@ -101,7 +101,7 @@ func (s siloTransportHandler) ReceiveUnsubscribeObserverRequest(ctx context.Cont
 	})
 	if err != nil {
 		promise.Resolve(encodeError(ctx, err))
-		s.log.Error(err, "failed to enqueue register observer", "observer", observer, "observable", observable, "name", name)
+		s.log.Error(err, "failed to enqueue unregister observer", "observer", observer, "observable", observable, "name", name)
 	}
 }
 
