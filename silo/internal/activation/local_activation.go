@@ -14,7 +14,6 @@ import (
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"
 	"github.com/jaym/go-orleans/grain/generic"
-	"github.com/jaym/go-orleans/silo/services/observer"
 	"github.com/jaym/go-orleans/silo/services/timer"
 )
 
@@ -101,17 +100,15 @@ type LocalGrainActivator struct {
 	siloClient         grain.SiloClient
 	timerService       timer.TimerService
 	resourceManager    *ResourceManager
-	observerStore      observer.Store
 	deactivateCallback func(grain.Identity)
 }
 
-func NewLocalGrainActivator(registrar descriptor.Registrar, siloClient grain.SiloClient, timerService timer.TimerService, resourceManager *ResourceManager, observerStore observer.Store, deactivateCallback func(grain.Identity)) *LocalGrainActivator {
+func NewLocalGrainActivator(registrar descriptor.Registrar, siloClient grain.SiloClient, timerService timer.TimerService, resourceManager *ResourceManager, deactivateCallback func(grain.Identity)) *LocalGrainActivator {
 	return &LocalGrainActivator{
 		registrar:          registrar,
 		siloClient:         siloClient,
 		timerService:       timerService,
 		resourceManager:    resourceManager,
-		observerStore:      observerStore,
 		deactivateCallback: deactivateCallback,
 	}
 }
@@ -184,8 +181,6 @@ func (l *LocalGrainActivation) start() {
 }
 
 func (l *LocalGrainActivation) loop(ctx context.Context) {
-	observerManager := newGrainObserverManager(l.identity, l.grainActivator.observerStore, l.grainActivator.siloClient)
-
 	l.grainTimerService = &grainTimerServiceImpl{
 		grainIdentity: l.identity,
 		timerService:  l.grainActivator.timerService,
@@ -203,7 +198,7 @@ func (l *LocalGrainActivation) loop(ctx context.Context) {
 		return
 	}
 
-	activation, err := l.description.Activation.Handler(l.activator, ctx, coreServices, observerManager, l.identity)
+	activation, err := l.description.Activation.Handler(l.activator, ctx, coreServices, l.identity)
 	if err != nil {
 		l.setStateDeactivating()
 		l.shutdown(ctx, err)

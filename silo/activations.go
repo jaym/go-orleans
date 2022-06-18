@@ -15,7 +15,6 @@ import (
 	"github.com/jaym/go-orleans/grain/generic"
 	"github.com/jaym/go-orleans/silo/internal/activation"
 	"github.com/jaym/go-orleans/silo/services/cluster"
-	"github.com/jaym/go-orleans/silo/services/observer"
 	"github.com/jaym/go-orleans/silo/services/timer"
 )
 
@@ -65,7 +64,6 @@ type GrainActivationManagerImpl struct {
 	registrar           descriptor.Registrar
 	siloClient          grain.SiloClient
 	timerService        timer.TimerService
-	observerStore       observer.Store
 	grainActivations    map[grain.Identity]*activation.LocalGrainActivation
 	localGrainActivator *activation.LocalGrainActivator
 	grainDirectory      cluster.GrainDirectory
@@ -82,7 +80,6 @@ func NewGrainActivationManager(
 	nodeName cluster.Location,
 	siloClient grain.SiloClient,
 	timerService timer.TimerService,
-	observerStore observer.Store,
 	grainDirectory cluster.GrainDirectory,
 	maxGrains int,
 ) *GrainActivationManagerImpl {
@@ -91,7 +88,6 @@ func NewGrainActivationManager(
 		registrar:        registrar,
 		siloClient:       siloClient,
 		timerService:     timerService,
-		observerStore:    observerStore,
 		nodeName:         nodeName,
 		grainActivations: make(map[grain.Identity]*activation.LocalGrainActivation),
 		grainDirectory:   grainDirectory,
@@ -128,7 +124,6 @@ func (m *GrainActivationManagerImpl) Start(ctx context.Context) error {
 		m.siloClient,
 		m.timerService,
 		m.resourceManager,
-		m.observerStore,
 		deactivateCallback)
 	m.resourceManager.Start()
 	m.timerService.Start()

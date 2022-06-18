@@ -14,7 +14,6 @@ import (
 	"github.com/jaym/go-orleans/plugins/codec/protobuf"
 	"github.com/jaym/go-orleans/silo/internal/transport"
 	"github.com/jaym/go-orleans/silo/services/cluster"
-	"github.com/jaym/go-orleans/silo/services/observer"
 	"github.com/jaym/go-orleans/silo/services/timer"
 )
 
@@ -23,7 +22,6 @@ type Silo struct {
 	localGrainManager  *GrainActivationManagerImpl
 	client             *siloClientImpl
 	timerService       timer.TimerService
-	observerStore      observer.Store
 	log                logr.Logger
 	nodeName           cluster.Location
 	grainDirectory     cluster.GrainDirectory
@@ -33,7 +31,7 @@ type Silo struct {
 	transportFactory   cluster.TransportFactory
 }
 
-func NewSilo(log logr.Logger, observerStore observer.Store, opts ...SiloOption) *Silo {
+func NewSilo(log logr.Logger, opts ...SiloOption) *Silo {
 	options := siloOptions{
 		maxGrains: 1024,
 	}
@@ -46,7 +44,6 @@ func NewSilo(log logr.Logger, observerStore observer.Store, opts ...SiloOption) 
 			entries: map[string]registrarEntry{},
 		},
 		log:                log.WithName("silo"),
-		observerStore:      observerStore,
 		nodeName:           options.NodeName(),
 		grainDirectory:     options.GrainDirectory(),
 		discovery:          options.Discovery(),
@@ -80,7 +77,6 @@ func NewSilo(log logr.Logger, observerStore observer.Store, opts ...SiloOption) 
 		s.nodeName,
 		s.client,
 		s.timerService,
-		s.observerStore,
 		s.grainDirectory,
 		options.maxGrains,
 	)

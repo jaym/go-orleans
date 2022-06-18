@@ -10,42 +10,16 @@ import (
 	time "time"
 )
 
-type ChirperGrainServices interface {
-	CoreGrainServices() services.CoreGrainServices
-	NotifyMessageObservers(ctx context.Context, observers []grain.RegisteredObserver, val *ChirpMessage) error
-	ListMessageObservers(ctx context.Context) ([]grain.RegisteredObserver, error)
-	AddMessageObserver(ctx context.Context, observer grain.Identity, registrationTimeout time.Duration, req *SubscribeRequest) error
-	RemoveMessageObserver(ctx context.Context, observer grain.Identity) error
-}
-
 type impl_ChirperGrainServices struct {
-	observerManager services.GrainObserverManager
-	coreServices    services.CoreGrainServices
+	coreServices services.CoreGrainServices
 }
 
 func (m *impl_ChirperGrainServices) CoreGrainServices() services.CoreGrainServices {
 	return m.coreServices
 }
 
-func (m *impl_ChirperGrainServices) NotifyMessageObservers(ctx context.Context, observers []grain.RegisteredObserver, val *ChirpMessage) error {
-	return m.observerManager.Notify(ctx, ChirperGrain_GrainDesc.Observables[0].Name, observers, val)
-}
-
-func (m *impl_ChirperGrainServices) ListMessageObservers(ctx context.Context) ([]grain.RegisteredObserver, error) {
-	return m.observerManager.List(ctx, ChirperGrain_GrainDesc.Observables[0].Name)
-}
-
-func (m *impl_ChirperGrainServices) AddMessageObserver(ctx context.Context, observer grain.Identity, registrationTimeout time.Duration, req *SubscribeRequest) error {
-	_, err := m.observerManager.Add(ctx, ChirperGrain_GrainDesc.Observables[0].Name, observer, registrationTimeout, req)
-	return err
-}
-
-func (m *impl_ChirperGrainServices) RemoveMessageObserver(ctx context.Context, observer grain.Identity) error {
-	return m.observerManager.Remove(ctx, ChirperGrain_GrainDesc.Observables[0].Name, observer)
-}
-
 type ChirperGrainActivator interface {
-	Activate(ctx context.Context, identity grain.Identity, services ChirperGrainServices) (ChirperGrain, error)
+	Activate(ctx context.Context, identity grain.Identity, services services.CoreGrainServices) (ChirperGrain, error)
 }
 
 func RegisterChirperGrainActivator(registrar descriptor.Registrar, activator ChirperGrainActivator) {
@@ -73,7 +47,7 @@ func CreateChirperGrainMessageStream(g *generic.Grain) (*ChirperGrainMessageStre
 
 	stream := &ChirperGrainMessageStream{
 		Stream: genericStream,
-		c:      make(chan ChirperGrainMessageStreamMessage),
+		c:      make(chan ChirperGrainMessageStreamMessage, 10),
 	}
 
 	go func() {
@@ -93,8 +67,9 @@ func CreateChirperGrainMessageStream(g *generic.Grain) (*ChirperGrainMessageStre
 					m.Value = val
 				}
 				select {
+				case <-stream.Stream.Done():
+					return
 				case stream.c <- m:
-				default:
 				}
 			}
 		}
@@ -149,12 +124,8 @@ var ChirperGrain_GrainDesc = descriptor.GrainDescription{
 	},
 }
 
-func _ChirperGrain_Activate(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, observerManager services.GrainObserverManager, identity grain.Identity) (grain.GrainReference, error) {
-	grainServices := &impl_ChirperGrainServices{
-		observerManager: observerManager,
-		coreServices:    coreServices,
-	}
-	return activator.(ChirperGrainActivator).Activate(ctx, identity, grainServices)
+func _ChirperGrain_Activate(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
+	return activator.(ChirperGrainActivator).Activate(ctx, identity, coreServices)
 }
 
 func _ChirperGrain_PublishMessage_MethodHandler(srv interface{}, ctx context.Context, dec func(interface{}) error) (interface{}, error) {

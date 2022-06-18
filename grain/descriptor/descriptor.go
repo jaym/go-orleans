@@ -31,7 +31,7 @@ type ObservableDesc struct {
 	UnsubscribeHandler UnsubscribeObserverHandler
 }
 
-type ActivationHandler func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, o services.GrainObserverManager, identity grain.Identity) (grain.GrainReference, error)
+type ActivationHandler func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error)
 type MethodHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) (interface{}, error)
 type ObservableHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) error
 type RegisterObserverHandler func(srv interface{}, ctx context.Context, observer grain.Identity, registrationTimeout time.Duration, dec func(interface{}) error) error

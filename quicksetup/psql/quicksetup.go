@@ -13,11 +13,8 @@ import (
 	"github.com/go-logr/stdr"
 	"github.com/jackc/pgx/v4/pgxpool"
 
-	"github.com/jaym/go-orleans/plugins/codec/protobuf"
 	graindir_psql "github.com/jaym/go-orleans/plugins/graindir/psql"
 	"github.com/jaym/go-orleans/plugins/membership/memberlist"
-	"github.com/jaym/go-orleans/plugins/observers/psql"
-	observer_psql "github.com/jaym/go-orleans/plugins/observers/psql"
 	"github.com/jaym/go-orleans/plugins/transport/grpc"
 	"github.com/jaym/go-orleans/silo"
 	"github.com/jaym/go-orleans/silo/services/cluster"
@@ -119,18 +116,10 @@ func Setup(ctx context.Context, opts ...SetupOpt) (*silo.Silo, error) {
 		return nil, err
 	}
 
-	poolObservers, err := setupDatabase(context.Background(), sOpts, "observers", observer_psql.SetupDatabase)
-	if err != nil {
-		return nil, err
-	}
-
 	poolGrainDir, err := setupDatabase(context.Background(), sOpts, "graindir", graindir_psql.SetupDatabase)
 	if err != nil {
 		return nil, err
 	}
-
-	observerStore := observer_psql.NewObserverStore(sOpts.logr.WithName("observerstore"),
-		poolObservers, psql.WithCodec(protobuf.NewCodec()))
 
 	grainDir := graindir_psql.NewGrainDirectory(sOpts.logr.WithName("graindir"), poolGrainDir)
 
@@ -158,7 +147,7 @@ func Setup(ctx context.Context, opts ...SetupOpt) (*silo.Silo, error) {
 		silo.WithMembership(mp, orlServer),
 		silo.WithGrainDirectory(grainDir),
 	}, sOpts.siloOpts...)
-	s := silo.NewSilo(sOpts.logr, observerStore, siloOpts...)
+	s := silo.NewSilo(sOpts.logr, siloOpts...)
 
 	return s, nil
 }

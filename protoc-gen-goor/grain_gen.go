@@ -17,16 +17,14 @@ const (
 )
 
 var (
-	contextType              = contextPackage.Ident("Context")
-	durationType             = timePackage.Ident("Duration")
-	siloClientType           = grainPackage.Ident("SiloClient")
-	grainRefType             = grainPackage.Ident("GrainReference")
-	identityType             = grainPackage.Ident("Identity")
-	registeredObserverType   = grainPackage.Ident("RegisteredObserver")
-	grainObserverManagerType = grainServicesPackage.Ident("GrainObserverManager")
-	coreGrainServicesType    = grainServicesPackage.Ident("CoreGrainServices")
-	genericGrainType         = genericGrainPackage.Ident("Grain")
-	streamType               = genericGrainPackage.Ident("Stream")
+	contextType           = contextPackage.Ident("Context")
+	durationType          = timePackage.Ident("Duration")
+	siloClientType        = grainPackage.Ident("SiloClient")
+	grainRefType          = grainPackage.Ident("GrainReference")
+	identityType          = grainPackage.Ident("Identity")
+	coreGrainServicesType = grainServicesPackage.Ident("CoreGrainServices")
+	genericGrainType      = genericGrainPackage.Ident("Grain")
+	streamType            = genericGrainPackage.Ident("Stream")
 )
 
 func GenerateGrain(g *protogen.GeneratedFile, f *protogen.File) error {
@@ -282,113 +280,19 @@ func grainRefInterfaceUnsubscribeObserverSignature(g *protogen.GeneratedFile, m 
 }
 
 func generateGrainServices(g *protogen.GeneratedFile, svc *protogen.Service) {
-	writeGrainServicesInterface(g, svc)
 	writeGrainServicesImplementation(g, svc)
 	writeGrainActivatorInterface(g, svc)
 	writeRegisterGrainActivator(g, svc)
 }
 
-func writeGrainServicesInterface(g *protogen.GeneratedFile, svc *protogen.Service) {
-	g.P("type ", svc.GoName, "GrainServices interface {")
-	g.P("CoreGrainServices() ", g.QualifiedGoIdent(coreGrainServicesType))
-	for _, m := range svc.Methods {
-		if isObservable(m) {
-			g.P("Notify", m.GoName, "Observers(",
-				"ctx ", g.QualifiedGoIdent(contextType), ", ",
-				"observers []", g.QualifiedGoIdent(registeredObserverType), ", ",
-				"val *", g.QualifiedGoIdent(m.Output.GoIdent), ") error",
-			)
-
-			g.P("List", m.GoName, "Observers(",
-				"ctx ", g.QualifiedGoIdent(contextType), ") (",
-				"[]", g.QualifiedGoIdent(registeredObserverType), ", error)",
-			)
-			g.P("Add", m.GoName, "Observer(",
-				"ctx ", g.QualifiedGoIdent(contextType), ",",
-				"observer ", g.QualifiedGoIdent(identityType), ",",
-				"registrationTimeout ", g.QualifiedGoIdent(durationType), ", ",
-				"req *", g.QualifiedGoIdent(m.Input.GoIdent), ",",
-				") error",
-			)
-			g.P("Remove", m.GoName, "Observer(",
-				"ctx ", g.QualifiedGoIdent(contextType), ",",
-				"observer ", g.QualifiedGoIdent(identityType), ",",
-				") error",
-			)
-		}
-	}
-	g.P("}")
-	g.P()
-}
-
 func writeGrainServicesImplementation(g *protogen.GeneratedFile, svc *protogen.Service) {
 	g.P("type ", "impl_", svc.GoName, "GrainServices struct {")
-	g.P("observerManager ", grainObserverManagerType)
 	g.P("coreServices ", coreGrainServicesType)
 	g.P("}")
 	g.P()
 	g.P("func (m *", "impl_", svc.GoName, "GrainServices) CoreGrainServices() ", coreGrainServicesType, " {")
 	g.P("return m.coreServices")
 	g.P("}")
-	g.P()
-
-	observerIdx := 0
-	for _, m := range svc.Methods {
-		if isObservable(m) {
-			g.P("func (m *", "impl_", svc.GoName, "GrainServices) Notify", m.GoName, "Observers(",
-				"ctx ", g.QualifiedGoIdent(contextType), ", ",
-				"observers []", g.QualifiedGoIdent(registeredObserverType), ", ",
-				"val *", g.QualifiedGoIdent(m.Output.GoIdent), ") error {",
-			)
-			g.P("return m.observerManager.Notify(",
-				"ctx,",
-				svc.GoName, "Grain_GrainDesc.Observables[", observerIdx, "].Name,",
-				"observers, val)",
-			)
-			g.P("}")
-			g.P()
-
-			g.P("func (m *", "impl_", svc.GoName, "GrainServices) List", m.GoName, "Observers(",
-				"ctx ", g.QualifiedGoIdent(contextType), ") (",
-				"[]", g.QualifiedGoIdent(registeredObserverType), ", error) {",
-			)
-			g.P("return m.observerManager.List(",
-				"ctx,",
-				svc.GoName, "Grain_GrainDesc.Observables[", observerIdx, "].Name)",
-			)
-			g.P("}")
-			g.P()
-			g.P("func (m *", "impl_", svc.GoName, "GrainServices) Add", m.GoName, "Observer(",
-				"ctx ", g.QualifiedGoIdent(contextType), ",",
-				"observer ", g.QualifiedGoIdent(identityType), ",",
-				"registrationTimeout ", g.QualifiedGoIdent(durationType), ", ",
-				"req *", g.QualifiedGoIdent(m.Input.GoIdent), ",",
-				") error {",
-			)
-			g.P("_, err := m.observerManager.Add(",
-				"ctx,",
-				svc.GoName, "Grain_GrainDesc.Observables[", observerIdx, "].Name,",
-				"observer, registrationTimeout, req)",
-			)
-			g.P("return err")
-			g.P("}")
-			g.P()
-			g.P("func (m *", "impl_", svc.GoName, "GrainServices) Remove", m.GoName, "Observer(",
-				"ctx ", g.QualifiedGoIdent(contextType), ",",
-				"observer ", g.QualifiedGoIdent(identityType), ",",
-				") error {",
-			)
-			g.P("return m.observerManager.Remove(",
-				"ctx,",
-				svc.GoName, "Grain_GrainDesc.Observables[", observerIdx, "].Name,",
-				"observer)",
-			)
-			g.P("}")
-			g.P()
-
-			observerIdx++
-		}
-	}
 	g.P()
 }
 
@@ -397,7 +301,7 @@ func writeGrainActivatorInterface(g *protogen.GeneratedFile, svc *protogen.Servi
 	g.P("Activate(",
 		"ctx ", g.QualifiedGoIdent(contextType), ", ",
 		"identity ", g.QualifiedGoIdent(identityType), ", ",
-		"services ", svc.GoName, "GrainServices", ") (",
+		"services ", g.QualifiedGoIdent(coreGrainServicesType), ") (",
 		svc.GoName, "Grain, error)",
 	)
 	g.P("}")
@@ -440,16 +344,11 @@ func writeActivateHandler(g *protogen.GeneratedFile, svc *protogen.Service) {
 		"activator interface{},",
 		"ctx ", g.QualifiedGoIdent(contextType), ", ",
 		"coreServices ", g.QualifiedGoIdent(coreGrainServicesType), ", ",
-		"observerManager ", g.QualifiedGoIdent(grainObserverManagerType), ", ",
 		"identity ", g.QualifiedGoIdent(identityType), ") (",
 		g.QualifiedGoIdent(grainRefType), ", error) {",
 	)
 
-	g.P("grainServices := &", "impl_", svc.GoName, "GrainServices {")
-	g.P("observerManager: observerManager,")
-	g.P("coreServices: coreServices,")
-	g.P("}")
-	g.P("return activator.(", svc.GoName, "GrainActivator)", ".Activate(ctx, identity, grainServices)")
+	g.P("return activator.(", svc.GoName, "GrainActivator)", ".Activate(ctx, identity, coreServices)")
 
 	g.P("}")
 	g.P()

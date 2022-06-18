@@ -34,7 +34,7 @@ const (
 var Descriptor = descriptor.GrainDescription{
 	GrainType: GenericGrainType,
 	Activation: descriptor.ActivationDesc{
-		Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, o services.GrainObserverManager, identity grain.Identity) (grain.GrainReference, error) {
+		Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
 			g := activator.(*Grain)
 			err := coreServices.TimerService().RegisterTicker("obsv", registrationRefreshInterval, func() {
 				g.refreshObservables(ctx)
