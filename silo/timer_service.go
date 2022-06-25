@@ -111,12 +111,12 @@ func (s *timerServiceImpl) start() {
 				now := s.nowProvider()
 				for {
 					if len(*s.queue) == 0 {
-						s.log.V(5).Info("nothing to trigger: none available")
+						s.log.V(16).Info("nothing to trigger: none available")
 						break
 					}
 
 					if (*s.queue)[0].triggerAt.After(now) {
-						s.log.V(5).Info("nothing to trigger: none ready")
+						s.log.V(16).Info("nothing to trigger: none ready")
 						break
 					}
 					v := heap.Pop(s.queue).(*timerEntry)
@@ -209,6 +209,7 @@ func (s *timerServiceImpl) register(ident grain.Identity, name string, d time.Du
 		name:      name,
 		triggerAt: s.nowProvider().Add(d),
 		repeat:    repeat,
+		d:         d,
 	}
 	s.timerEntries[entryName] = entry
 	heap.Push(s.queue, entry)

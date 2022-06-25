@@ -100,18 +100,32 @@ func (s *TransportServer) Send(recv internal.Transport_SendServer) error {
 	if err != nil {
 		return err
 	}
-	s.log.Info("node connected", "node", tp.dstNode.name, "ip", tp.dstNode.ip, "port", tp.dstNode.port)
-	for {
-		msg, err := recv.Recv()
-		if err != nil {
-			if err == io.EOF {
-				s.log.Info("messsage channel shutting down")
-				return recv.SendAndClose(&internal.SendResponse{})
+	s.log.Info("node connected", "node", tp.dstNode.name, "ip", tp.dstNode.ip, "port", tp.dstNode.port, "tp", tp)
+	var errOut error
+	doneChan := make(chan struct{})
+	go func() {
+		for {
+			msg, err := recv.Recv()
+			if err != nil {
+				if err == io.EOF {
+					s.log.Info("messsage channel shutting down")
+					errOut = recv.SendAndClose(&internal.SendResponse{})
+					return
+				}
+				s.log.Error(err, "message channel errored")
+				errOut = err
+				return
 			}
-			s.log.Error(err, "message channel errored")
-			return err
+			tp.log.V(5).Info("Received message", "from", tp.dstNode.name)
+			tp.recv(msg)
 		}
-		tp.recv(msg)
+	}()
+
+	select {
+	case <-doneChan:
+		return errOut
+	case <-tp.closeChan:
+		return nil
 	}
 }
 
@@ -143,12 +157,15 @@ func (s *TransportServer) createTransport(n node) *transport {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	if tp, ok := s.transports[n.name]; ok {
+		s.log.Info("REUSING TRANSPORT")
 		return tp
 	}
 	nodeName := n.name
 	tp := newTransport(s.log, s.thisNode, n, func() {
 		s.lock.Lock()
 		defer s.lock.Unlock()
+		s.log.Info("DELETING TRANSPORT")
+
 		delete(s.transports, nodeName)
 	})
 	s.transports[n.name] = tp
@@ -194,6 +211,8 @@ func (t *transport) recv(msg *internal.TransportMessage) {
 }
 
 func (t *transport) Listen(h cluster.TransportHandler) error {
+	t.log.V(0).Info("Listen called", "for", t.dstNode.name)
+
 	t.wg.Add(2)
 	go func() {
 		defer t.wg.Done()
@@ -253,6 +272,7 @@ func (t *transport) Listen(h cluster.TransportHandler) error {
 		for {
 			select {
 			case msg := <-t.outbox:
+				t.log.V(5).Info("Sending message", "to", t.dstNode.name)
 				sndr, err := getSender()
 				if err != nil {
 					t.log.Error(err, "failed to send message")
@@ -266,6 +286,7 @@ func (t *transport) Listen(h cluster.TransportHandler) error {
 				}
 
 			case <-t.closeChan:
+				t.log.V(0).Info("SHUTTING IT DOWN")
 				if sender != nil {
 					if err := sender.CloseSend(); err != nil {
 						t.log.Error(err, "failed to close send")
@@ -372,6 +393,7 @@ func internalGrainIdent(id grain.Identity) *internal.GrainIdentity {
 }
 
 func (t *transport) Stop() error {
+	t.log.V(0).Info("Stopping transport", "node", t.dstNode.name)
 	t.onStop()
 	close(t.closeChan)
 	t.wg.Wait()

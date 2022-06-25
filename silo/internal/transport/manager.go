@@ -126,14 +126,38 @@ type managedTransportInternal struct {
 	log                         logr.Logger
 	transport                   cluster.Transport
 	lock                        sync.Mutex
+	stopped                     bool
 	invokeMethodPromises        map[string]InvokeMethodPromise
 	registerObserverPromises    map[string]RegisterObserverPromise
 	unsubscribeObserverPromises map[string]UnsubscribeObserverPromise
 }
 
 func (h *managedTransportInternal) stop() error {
-	return h.transport.Stop()
-	//TODO: fail all the promises
+	errTransportStop := h.transport.Stop()
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	for _, p := range h.invokeMethodPromises {
+		// TODO: better error handling
+		p.Resolve(nil, []byte("transport stopped"))
+	}
+	h.invokeMethodPromises = nil
+
+	for _, p := range h.registerObserverPromises {
+		// TODO: better error handling
+		p.Resolve([]byte("transport stopped"))
+	}
+	h.registerObserverPromises = nil
+
+	for _, p := range h.unsubscribeObserverPromises {
+		// TODO: better error handling
+		p.Resolve([]byte("transport stopped"))
+	}
+	h.unsubscribeObserverPromises = nil
+
+	h.stopped = true
+
+	return errTransportStop
 }
 
 func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string) RegisterObserverFuture {
@@ -149,7 +173,11 @@ func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string) 
 	}
 	h.lock.Lock()
 	defer h.lock.Unlock()
-	h.registerObserverPromises[uuid] = p
+	if h.stopped {
+		p.Resolve([]byte("transport stopped"))
+	} else {
+		h.registerObserverPromises[uuid] = p
+	}
 	return f
 }
 
@@ -166,7 +194,12 @@ func (h *managedTransportInternal) registerUnsubscribeObserverPromise(uuid strin
 	}
 	h.lock.Lock()
 	defer h.lock.Unlock()
-	h.unsubscribeObserverPromises[uuid] = p
+	if h.stopped {
+		p.Resolve([]byte("transport stopped"))
+
+	} else {
+		h.unsubscribeObserverPromises[uuid] = p
+	}
 	return f
 }
 
@@ -187,7 +220,11 @@ func (h *managedTransportInternal) registerInvokeMethodPromise(uuid string) Invo
 	}
 	h.lock.Lock()
 	defer h.lock.Unlock()
-	h.invokeMethodPromises[uuid] = p
+	if h.stopped {
+		p.Resolve(nil, []byte("transport stopped"))
+	} else {
+		h.invokeMethodPromises[uuid] = p
+	}
 	return f
 }
 
