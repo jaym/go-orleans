@@ -1,6 +1,7 @@
 package activation
 
 import (
+	"context"
 	"time"
 
 	"github.com/jaym/go-orleans/grain"
@@ -10,10 +11,10 @@ import (
 type grainTimerServiceImpl struct {
 	grainIdentity grain.Identity
 	timerService  timer.TimerService
-	timers        map[string]func()
+	timers        map[string]func(ctx context.Context)
 }
 
-func (g *grainTimerServiceImpl) RegisterTimer(name string, d time.Duration, f func()) error {
+func (g *grainTimerServiceImpl) RegisterTimer(name string, d time.Duration, f func(ctx context.Context)) error {
 	if err := g.timerService.RegisterTimer(g.grainIdentity, name, d); err != nil {
 		return err
 	}
@@ -21,7 +22,7 @@ func (g *grainTimerServiceImpl) RegisterTimer(name string, d time.Duration, f fu
 	return nil
 }
 
-func (g *grainTimerServiceImpl) RegisterTicker(name string, d time.Duration, f func()) error {
+func (g *grainTimerServiceImpl) RegisterTicker(name string, d time.Duration, f func(ctx context.Context)) error {
 	if err := g.timerService.RegisterTicker(g.grainIdentity, name, d); err != nil {
 		return err
 	}
@@ -29,10 +30,10 @@ func (g *grainTimerServiceImpl) RegisterTicker(name string, d time.Duration, f f
 	return nil
 }
 
-func (g *grainTimerServiceImpl) Trigger(name string) {
+func (g *grainTimerServiceImpl) Trigger(ctx context.Context, name string) {
 	if f, ok := g.timers[name]; ok {
 		delete(g.timers, name)
-		f()
+		f(ctx)
 	}
 }
 

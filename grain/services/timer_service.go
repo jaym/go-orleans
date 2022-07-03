@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -9,8 +10,8 @@ import (
 var ErrTimerAlreadyRegistered = errors.New("timer already registered")
 
 type GrainTimerService interface {
-	Trigger(name string)
-	RegisterTimer(name string, d time.Duration, f func()) error
-	RegisterTicker(name string, d time.Duration, f func()) error
+	Trigger(ctx context.Context, name string)
+	RegisterTimer(name string, d time.Duration, f func(context.Context)) error
+	RegisterTicker(name string, d time.Duration, f func(context.Context)) error
 	Cancel(name string) bool
 }

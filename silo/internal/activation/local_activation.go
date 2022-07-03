@@ -17,6 +17,10 @@ import (
 	"github.com/jaym/go-orleans/silo/services/timer"
 )
 
+var defaultDeactivateTimeout time.Duration = 60 * time.Second
+var defaultGrainTimerTriggerTimeout time.Duration = 30 * time.Second
+var defaultGrainInvocationTimeout time.Duration = 2 * time.Second
+
 type grainActivationMessageType int
 
 const (
@@ -31,6 +35,7 @@ type grainActivationInvokeMethod struct {
 	Sender      grain.Identity
 	Method      string
 	Payload     []byte
+	Deadline    time.Time
 	ResolveFunc func(out interface{}, err error)
 }
 
@@ -39,12 +44,14 @@ type grainActivationRegisterObserver struct {
 	Name                string
 	Payload             []byte
 	RegistrationTimeout time.Duration
+	Deadline            time.Time
 	ResolveFunc         func(err error)
 }
 
 type grainActivationUnsubscribeObserver struct {
 	Observer    grain.Identity
 	Name        string
+	Deadline    time.Time
 	ResolveFunc func(err error)
 }
 
@@ -184,7 +191,7 @@ func (l *LocalGrainActivation) loop(ctx context.Context) {
 	l.grainTimerService = &grainTimerServiceImpl{
 		grainIdentity: l.identity,
 		timerService:  l.grainActivator.timerService,
-		timers:        map[string]func(){},
+		timers:        map[string]func(context.Context){},
 	}
 
 	coreServices := &coreGrainService{
@@ -240,6 +247,9 @@ func (l *LocalGrainActivation) setStateDeactivated() {
 }
 
 func (l *LocalGrainActivation) evict(ctx context.Context, activation grain.GrainReference, mustStop bool, onComplete func(error)) bool {
+	ctx, cancel := context.WithTimeout(ctx, defaultDeactivateTimeout)
+	defer cancel()
+
 	canEvict := true
 	if hasCanEvict, ok := activation.(HasCanEvict); ok {
 		canEvict = hasCanEvict.CanEvict(ctx)
@@ -267,6 +277,17 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 			req.ResolveFunc(nil, err)
 			return
 		}
+
+		var cancel context.CancelFunc
+		if deadline := msg.invokeMethod.Deadline; !deadline.IsZero() {
+			ctx, cancel = context.WithDeadline(ctx, deadline)
+		} else if m.DefaultTimeout != 0 {
+			ctx, cancel = context.WithTimeout(ctx, m.DefaultTimeout)
+		} else {
+			ctx, cancel = context.WithTimeout(ctx, defaultGrainInvocationTimeout)
+		}
+		defer cancel()
+
 		resp, err := m.Handler(activation, ctx, func(in interface{}) error {
 			return proto.Unmarshal(req.Payload, in.(proto.Message))
 		})
@@ -280,6 +301,17 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 			req.ResolveFunc(err)
 			return
 		}
+
+		var cancel context.CancelFunc
+		if deadline := msg.registerObserver.Deadline; !deadline.IsZero() {
+			ctx, cancel = context.WithDeadline(ctx, deadline)
+		} else if o.DefaultTimeout != 0 {
+			ctx, cancel = context.WithTimeout(ctx, o.DefaultTimeout)
+		} else {
+			ctx, cancel = context.WithTimeout(ctx, defaultGrainInvocationTimeout)
+		}
+		defer cancel()
+
 		err = o.RegisterHandler(activation, ctx, req.Observer, req.RegistrationTimeout, func(in interface{}) error {
 			return proto.Unmarshal(req.Payload, in.(proto.Message))
 		})
@@ -291,6 +323,17 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 			req.ResolveFunc(err)
 			return
 		}
+
+		var cancel context.CancelFunc
+		if deadline := msg.unsubscribeObserver.Deadline; !deadline.IsZero() {
+			ctx, cancel = context.WithDeadline(ctx, deadline)
+		} else if o.DefaultTimeout != 0 {
+			ctx, cancel = context.WithTimeout(ctx, o.DefaultTimeout)
+		} else {
+			ctx, cancel = context.WithTimeout(ctx, defaultGrainInvocationTimeout)
+		}
+		defer cancel()
+
 		err = o.UnsubscribeHandler(activation, ctx, req.Observer)
 		req.ResolveFunc(err)
 	case notifyObserver:
@@ -307,6 +350,9 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 			return proto.Unmarshal(req.Payload, in.(proto.Message))
 		}
 
+		ctx, cancel := context.WithTimeout(ctx, defaultGrainInvocationTimeout)
+		defer cancel()
+
 		if genericGrain, ok := activation.(*generic.Grain); ok {
 			genericGrain.HandleNotification(req.ObservableType, req.Name, req.Sender, decoder)
 		} else {
@@ -318,7 +364,9 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 
 	case triggerTimer:
 		req := msg.triggerTimer
-		l.grainTimerService.Trigger(req.Name)
+		ctx, cancel := context.WithTimeout(ctx, defaultGrainTimerTriggerTimeout)
+		defer cancel()
+		l.grainTimerService.Trigger(ctx, req.Name)
 	}
 }
 

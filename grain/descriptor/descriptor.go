@@ -16,12 +16,14 @@ type GrainDescription struct {
 }
 
 type ActivationDesc struct {
-	Handler ActivationHandler
+	Handler        ActivationHandler
+	DefaultTimeout time.Duration
 }
 
 type MethodDesc struct {
-	Name    string
-	Handler MethodHandler
+	Name           string
+	Handler        MethodHandler
+	DefaultTimeout time.Duration
 }
 
 type ObservableDesc struct {
@@ -29,6 +31,7 @@ type ObservableDesc struct {
 	Handler            ObservableHandler
 	RegisterHandler    RegisterObserverHandler
 	UnsubscribeHandler UnsubscribeObserverHandler
+	DefaultTimeout     time.Duration
 }
 
 type ActivationHandler func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error)
