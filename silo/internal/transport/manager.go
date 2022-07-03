@@ -40,10 +40,12 @@ type TransportHandler interface {
 
 type InvokeMethodPromise interface {
 	Resolve(payload []byte, errData []byte)
+	Deadline() time.Time
 }
 
 type invokeMethodFuncPromise struct {
-	f func(payload []byte, err []byte)
+	deadline time.Time
+	f        func(payload []byte, err []byte)
 }
 
 func (p invokeMethodFuncPromise) Resolve(payload []byte, errData []byte) {
@@ -52,6 +54,10 @@ func (p invokeMethodFuncPromise) Resolve(payload []byte, errData []byte) {
 	} else {
 		p.f(payload, nil)
 	}
+}
+
+func (p invokeMethodFuncPromise) Deadline() time.Time {
+	return p.deadline
 }
 
 type invokeMethodChanFuture struct {
@@ -76,6 +82,7 @@ type InvokeMethodFuture interface {
 
 type RegisterObserverPromise interface {
 	Resolve(errData []byte)
+	Deadline() time.Time
 }
 
 type RegisterObserverFuture interface {
@@ -83,7 +90,8 @@ type RegisterObserverFuture interface {
 }
 
 type observerFuncPromise struct {
-	f func(err []byte)
+	deadline time.Time
+	f        func(err []byte)
 }
 
 func (p observerFuncPromise) Resolve(errData []byte) {
@@ -92,6 +100,10 @@ func (p observerFuncPromise) Resolve(errData []byte) {
 	} else {
 		p.f(nil)
 	}
+}
+
+func (p observerFuncPromise) Deadline() time.Time {
+	return p.deadline
 }
 
 type observerChanFuture struct {
@@ -255,41 +267,47 @@ func (h *managedTransportInternal) ReceiveInvokeMethodResponse(ctx context.Conte
 	delete(h.invokeMethodPromises, uuid)
 }
 
-func (h *managedTransportInternal) ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, uuid string, payload []byte) {
-	p := invokeMethodFuncPromise{f: func(payload []byte, err []byte) {
-		if err := h.transport.EnqueueInvokeMethodResponse(context.TODO(), sender, uuid, payload, err); err != nil {
-			h.log.V(0).Error(err, "failed to response to invoke method request",
-				"sender", sender,
-				"receiver", receiver,
-				"method", method, "uuid", uuid)
-		}
-	}}
+func (h *managedTransportInternal) ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, uuid string, payload []byte, deadline time.Time) {
+	p := invokeMethodFuncPromise{
+		deadline: deadline,
+		f: func(payload []byte, err []byte) {
+			if err := h.transport.EnqueueInvokeMethodResponse(context.TODO(), sender, uuid, payload, err); err != nil {
+				h.log.V(0).Error(err, "failed to response to invoke method request",
+					"sender", sender,
+					"receiver", receiver,
+					"method", method, "uuid", uuid)
+			}
+		}}
 	h.TransportHandler.ReceiveInvokeMethodRequest(ctx, sender, receiver, method, payload, p)
 }
 
-func (h *managedTransportInternal) ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte, opts cluster.EnqueueRegisterObserverRequestOptions) {
-	p := observerFuncPromise{f: func(errOut []byte) {
-		if err := h.transport.EnqueueAckRegisterObserver(context.TODO(), observer, uuid, errOut); err != nil {
-			h.log.V(0).Error(err, "failed to response to ack observer registration",
-				"observer", observer,
-				"observable", observable,
-				"name", name,
-				"uuid", uuid)
-		}
-	}}
+func (h *managedTransportInternal) ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte, opts cluster.EnqueueRegisterObserverRequestOptions, deadline time.Time) {
+	p := observerFuncPromise{
+		deadline: deadline,
+		f: func(errOut []byte) {
+			if err := h.transport.EnqueueAckRegisterObserver(context.TODO(), observer, uuid, errOut); err != nil {
+				h.log.V(0).Error(err, "failed to response to ack observer registration",
+					"observer", observer,
+					"observable", observable,
+					"name", name,
+					"uuid", uuid)
+			}
+		}}
 	h.TransportHandler.ReceiveRegisterObserverRequest(ctx, observer, observable, name, payload, opts.RegistrationTimeout, p)
 }
 
-func (h *managedTransportInternal) ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string) {
-	p := observerFuncPromise{f: func(errOut []byte) {
-		if err := h.transport.EnqueueAckUnsubscribeObserver(context.TODO(), observer, uuid, errOut); err != nil {
-			h.log.V(0).Error(err, "failed to response to ack unsubscribe observer",
-				"observer", observer,
-				"observable", observable,
-				"name", name,
-				"uuid", uuid)
-		}
-	}}
+func (h *managedTransportInternal) ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, deadline time.Time) {
+	p := observerFuncPromise{
+		deadline: deadline,
+		f: func(errOut []byte) {
+			if err := h.transport.EnqueueAckUnsubscribeObserver(context.TODO(), observer, uuid, errOut); err != nil {
+				h.log.V(0).Error(err, "failed to response to ack unsubscribe observer",
+					"observer", observer,
+					"observable", observable,
+					"name", name,
+					"uuid", uuid)
+			}
+		}}
 	h.TransportHandler.ReceiveUnsubscribeObserverRequest(ctx, observer, observable, name, p)
 }
 

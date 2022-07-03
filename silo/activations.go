@@ -23,6 +23,7 @@ type InvokeMethodRequest struct {
 	Receiver    grain.Identity
 	Method      string
 	in          []byte
+	deadline    time.Time
 	ResolveFunc func(interface{}, error)
 }
 
@@ -138,7 +139,7 @@ func (m *GrainActivationManagerImpl) EnqueueInvokeMethodRequest(req InvokeMethod
 		return err
 	}
 
-	return activation.InvokeMethod(req.Sender, req.Method, req.in, req.ResolveFunc)
+	return activation.InvokeMethod(req.Sender, req.Method, req.in, req.deadline, req.ResolveFunc)
 }
 
 func (m *GrainActivationManagerImpl) EnqueueRegisterObserverRequest(req RegisterObserverRequest) error {

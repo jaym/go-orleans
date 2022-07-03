@@ -25,6 +25,7 @@ func (s siloTransportHandler) ReceiveInvokeMethodRequest(ctx context.Context, se
 		Receiver: receiver,
 		Method:   method,
 		in:       payload,
+		deadline: promise.Deadline(),
 		ResolveFunc: func(i interface{}, e error) {
 			if e != nil {
 				promise.Resolve(nil, encodeError(ctx, e))
@@ -119,13 +120,21 @@ func (t *localTransport) Listen(handler cluster.TransportHandler) error {
 
 func (*localTransport) Stop() error { return nil }
 
+func deadline(ctx context.Context) time.Time {
+	t, ok := ctx.Deadline()
+	if !ok {
+		return time.Time{}
+	}
+	return t
+}
+
 func (t *localTransport) EnqueueInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, uuid string, payload []byte) error {
-	t.h.ReceiveInvokeMethodRequest(ctx, sender, receiver, method, uuid, payload)
+	t.h.ReceiveInvokeMethodRequest(ctx, sender, receiver, method, uuid, payload, deadline(ctx))
 	return nil
 }
 
 func (t *localTransport) EnqueueRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte, opts cluster.EnqueueRegisterObserverRequestOptions) error {
-	t.h.ReceiveRegisterObserverRequest(ctx, observer, observable, name, uuid, payload, opts)
+	t.h.ReceiveRegisterObserverRequest(ctx, observer, observable, name, uuid, payload, opts, deadline(ctx))
 	return nil
 }
 
@@ -145,7 +154,7 @@ func (t *localTransport) EnqueueInvokeMethodResponse(ctx context.Context, receiv
 }
 
 func (t *localTransport) EnqueueUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string) error {
-	t.h.ReceiveUnsubscribeObserverRequest(ctx, observer, observable, name, uuid)
+	t.h.ReceiveUnsubscribeObserverRequest(ctx, observer, observable, name, uuid, deadline(ctx))
 	return nil
 }
 

@@ -72,15 +72,16 @@ message AckUnsubscribeObserver {
 }
 
 message TransportMessage {
+  int64 deadline_unix = 1;
   oneof msg {
     Hello hello = 64;
-    InvokeMethodReq invoke_method_req = 1;
-    InvokeMethodResp invoke_method_resp = 2;
-    RegisterObserver register_observer = 3;
-    ObserverNotification observer_notification = 4;
-    AckRegisterObserver ack_register_observer = 5;
-    UnsubscribeObserver unsubscribe_observer = 6;
-    AckUnsubscribeObserver ack_unsubscribe_observer = 7;
+    InvokeMethodReq invoke_method_req = 2;
+    InvokeMethodResp invoke_method_resp = 3;
+    RegisterObserver register_observer = 4;
+    ObserverNotification observer_notification = 5;
+    AckRegisterObserver ack_register_observer = 6;
+    UnsubscribeObserver unsubscribe_observer = 7;
+    AckUnsubscribeObserver ack_unsubscribe_observer = 8;
   }
 }
 

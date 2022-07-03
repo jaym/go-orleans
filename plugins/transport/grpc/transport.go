@@ -331,10 +331,12 @@ func (t *transport) failSendMsg(ctx context.Context, msg *internal.TransportMess
 }
 
 func (t *transport) handleMsg(ctx context.Context, h cluster.TransportHandler, msg *internal.TransportMessage) {
+	deadline := time.UnixMilli(msg.DeadlineUnix)
+
 	switch m := msg.Msg.(type) {
 	case *internal.TransportMessage_InvokeMethodReq:
 		req := m.InvokeMethodReq
-		h.ReceiveInvokeMethodRequest(ctx, grainIdent(req.Sender), grainIdent(req.Receiver), req.Method, req.Uuid, req.Payload)
+		h.ReceiveInvokeMethodRequest(ctx, grainIdent(req.Sender), grainIdent(req.Receiver), req.Method, req.Uuid, req.Payload, deadline)
 	case *internal.TransportMessage_InvokeMethodResp:
 		req := m.InvokeMethodResp
 		h.ReceiveInvokeMethodResponse(ctx, grainIdent(req.Receiver), req.Uuid, req.Payload, req.Err)
@@ -342,7 +344,7 @@ func (t *transport) handleMsg(ctx context.Context, h cluster.TransportHandler, m
 		req := m.RegisterObserver
 		h.ReceiveRegisterObserverRequest(ctx, grainIdent(req.Observer), grainIdent(req.Observable), req.Name, req.Uuid, req.Payload, cluster.EnqueueRegisterObserverRequestOptions{
 			RegistrationTimeout: time.Duration(req.GetOpts().GetRegistrationTimeoutMillis()) * time.Millisecond,
-		})
+		}, deadline)
 	case *internal.TransportMessage_AckRegisterObserver:
 		req := m.AckRegisterObserver
 		h.ReceiveAckRegisterObserver(ctx, grainIdent(req.Receiver), req.Uuid, req.Err)
@@ -351,7 +353,7 @@ func (t *transport) handleMsg(ctx context.Context, h cluster.TransportHandler, m
 		h.ReceiveObserverNotification(ctx, grainIdent(req.Sender), grainIdents(req.Receivers), req.ObservableType, req.Name, req.Payload)
 	case *internal.TransportMessage_UnsubscribeObserver:
 		req := m.UnsubscribeObserver
-		h.ReceiveUnsubscribeObserverRequest(ctx, grainIdent(req.Observer), grainIdent(req.Observable), req.Name, req.Uuid)
+		h.ReceiveUnsubscribeObserverRequest(ctx, grainIdent(req.Observer), grainIdent(req.Observable), req.Name, req.Uuid, deadline)
 	case *internal.TransportMessage_AckUnsubscribeObserver:
 		req := m.AckUnsubscribeObserver
 		h.ReceiveAckUnsubscribeObserver(ctx, grainIdent(req.Receiver), req.Uuid, req.Err)

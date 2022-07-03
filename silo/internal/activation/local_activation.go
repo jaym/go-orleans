@@ -396,13 +396,14 @@ func (l *LocalGrainActivation) shutdown(ctx context.Context, err error) {
 	l.setStateDeactivated()
 }
 
-func (l *LocalGrainActivation) InvokeMethod(sender grain.Identity, method string, payload []byte, resolve func(out interface{}, err error)) error {
+func (l *LocalGrainActivation) InvokeMethod(sender grain.Identity, method string, payload []byte, deadline time.Time, resolve func(out interface{}, err error)) error {
 	return l.pushInbox(grainActivationMessage{
 		messageType: invokeMethod,
 		invokeMethod: &grainActivationInvokeMethod{
 			Sender:      sender,
 			Method:      method,
 			Payload:     payload,
+			Deadline:    deadline,
 			ResolveFunc: resolve,
 		},
 	})
