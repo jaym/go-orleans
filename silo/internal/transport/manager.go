@@ -9,6 +9,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
+	gogoproto "github.com/gogo/protobuf/proto"
 
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/silo/services/cluster"
@@ -139,13 +140,38 @@ type managedTransportInternal struct {
 	transport                   cluster.Transport
 	lock                        sync.Mutex
 	stopped                     bool
+	bgWorkerCancel              context.CancelFunc
+	deadlineHeap                *DeadlineHeap
 	invokeMethodPromises        map[string]InvokeMethodPromise
 	registerObserverPromises    map[string]RegisterObserverPromise
 	unsubscribeObserverPromises map[string]UnsubscribeObserverPromise
 }
 
+func (h *managedTransportInternal) backgroundCleanupWorker(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				break
+			case <-ticker.C:
+				func() {
+					h.lock.Lock()
+					defer h.lock.Unlock()
+					if h.stopped {
+						return
+					}
+					h.deadlineHeap.Expire(h.expirePromises)
+				}()
+			}
+		}
+	}()
+}
+
 func (h *managedTransportInternal) stop() error {
 	errTransportStop := h.transport.Stop()
+	h.bgWorkerCancel()
 	h.lock.Lock()
 	defer h.lock.Unlock()
 
@@ -172,13 +198,14 @@ func (h *managedTransportInternal) stop() error {
 	return errTransportStop
 }
 
-func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string) RegisterObserverFuture {
+func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string, deadline time.Time) RegisterObserverFuture {
 	f := observerChanFuture{
 		c: make(chan struct {
 			errData []byte
 		}, 1),
 	}
 	p := observerFuncPromise{
+		deadline: deadline,
 		f: func(errData []byte) {
 			f.c <- struct{ errData []byte }{errData: errData}
 		},
@@ -188,18 +215,20 @@ func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string) 
 	if h.stopped {
 		p.Resolve([]byte("transport stopped"))
 	} else {
+		h.deadlineHeap.ExpireAndAdd(RegisterObserverRequestType, uuid, deadline, h.expirePromises)
 		h.registerObserverPromises[uuid] = p
 	}
 	return f
 }
 
-func (h *managedTransportInternal) registerUnsubscribeObserverPromise(uuid string) RegisterObserverFuture {
+func (h *managedTransportInternal) registerUnsubscribeObserverPromise(uuid string, deadline time.Time) RegisterObserverFuture {
 	f := observerChanFuture{
 		c: make(chan struct {
 			errData []byte
 		}, 1),
 	}
 	p := observerFuncPromise{
+		deadline: deadline,
 		f: func(errData []byte) {
 			f.c <- struct{ errData []byte }{errData: errData}
 		},
@@ -208,14 +237,35 @@ func (h *managedTransportInternal) registerUnsubscribeObserverPromise(uuid strin
 	defer h.lock.Unlock()
 	if h.stopped {
 		p.Resolve([]byte("transport stopped"))
-
 	} else {
+		h.deadlineHeap.ExpireAndAdd(UnregisterObserverRequestType, uuid, deadline, h.expirePromises)
 		h.unsubscribeObserverPromises[uuid] = p
 	}
 	return f
 }
 
-func (h *managedTransportInternal) registerInvokeMethodPromise(uuid string) InvokeMethodFuture {
+func (h *managedTransportInternal) expirePromises(typ RequestType, uuid string) {
+	// must only be called while holding the lock
+	switch typ {
+	case InvokeMethodRequestType:
+		if p, ok := h.invokeMethodPromises[uuid]; ok {
+			p.Resolve(nil, encodeError(context.Background(), context.DeadlineExceeded))
+			delete(h.invokeMethodPromises, uuid)
+		}
+	case RegisterObserverRequestType:
+		if p, ok := h.registerObserverPromises[uuid]; ok {
+			p.Resolve(encodeError(context.Background(), context.DeadlineExceeded))
+			delete(h.registerObserverPromises, uuid)
+		}
+	case UnregisterObserverRequestType:
+		if p, ok := h.unsubscribeObserverPromises[uuid]; ok {
+			p.Resolve(encodeError(context.Background(), context.DeadlineExceeded))
+			delete(h.unsubscribeObserverPromises, uuid)
+		}
+	}
+}
+
+func (h *managedTransportInternal) registerInvokeMethodPromise(uuid string, deadline time.Time) InvokeMethodFuture {
 	f := invokeMethodChanFuture{
 		c: make(chan struct {
 			payload []byte
@@ -223,6 +273,7 @@ func (h *managedTransportInternal) registerInvokeMethodPromise(uuid string) Invo
 		}, 1),
 	}
 	p := invokeMethodFuncPromise{
+		deadline: deadline,
 		f: func(payload []byte, errData []byte) {
 			f.c <- struct {
 				payload []byte
@@ -235,6 +286,7 @@ func (h *managedTransportInternal) registerInvokeMethodPromise(uuid string) Invo
 	if h.stopped {
 		p.Resolve(nil, []byte("transport stopped"))
 	} else {
+		h.deadlineHeap.ExpireAndAdd(InvokeMethodRequestType, uuid, deadline, h.expirePromises)
 		h.invokeMethodPromises[uuid] = p
 	}
 	return f
@@ -337,16 +389,20 @@ func (m *Manager) AddTransport(nodeName cluster.Location, creator func() (cluste
 		return err
 	}
 
+	bgWorkerCxt, bgWorkerCancel := context.WithCancel(context.Background())
 	mt := &managedTransport{
 		internal: &managedTransportInternal{
 			log:                         m.log.WithName(string(nodeName)),
 			transport:                   transport,
 			TransportHandler:            m.handler,
+			bgWorkerCancel:              bgWorkerCancel,
+			deadlineHeap:                NewDeadlineHeap(),
 			invokeMethodPromises:        make(map[string]InvokeMethodPromise),
 			registerObserverPromises:    make(map[string]RegisterObserverPromise),
 			unsubscribeObserverPromises: make(map[string]UnsubscribeObserverPromise),
 		},
 	}
+	mt.internal.backgroundCleanupWorker(bgWorkerCxt)
 	m.transports[nodeName] = mt
 	m.nodeNames = append(m.nodeNames, string(nodeName))
 	return transport.Listen(mt.internal)
@@ -381,7 +437,9 @@ func (m *Manager) InvokeMethod(ctx context.Context, sender grain.Identity, recei
 		return nil, err
 	}
 
-	f := t.internal.registerInvokeMethodPromise(uuid)
+	deadline, _ := ctx.Deadline()
+
+	f := t.internal.registerInvokeMethodPromise(uuid, deadline)
 	if err := t.internal.transport.EnqueueInvokeMethodRequest(ctx, sender, receiver.Identity, method, uuid, payload); err != nil {
 		// TODO: if an error is returned, its possible that we never resolved the promise
 		return nil, err
@@ -395,7 +453,9 @@ func (m *Manager) RegisterObserver(ctx context.Context, observer grain.Identity,
 		return nil, err
 	}
 
-	f := t.internal.registerRegisterObserverPromise(uuid)
+	deadline, _ := ctx.Deadline()
+
+	f := t.internal.registerRegisterObserverPromise(uuid, deadline)
 	if err := t.internal.transport.EnqueueRegisterObserverRequest(ctx, observer, observable.Identity, name, uuid, payload, cluster.EnqueueRegisterObserverRequestOptions{
 		RegistrationTimeout: registrationTimeout,
 	}); err != nil {
@@ -411,7 +471,9 @@ func (m *Manager) UnsubscribeObserver(ctx context.Context, observer grain.Identi
 		return nil, err
 	}
 
-	f := t.internal.registerUnsubscribeObserverPromise(uuid)
+	deadline, _ := ctx.Deadline()
+
+	f := t.internal.registerUnsubscribeObserverPromise(uuid, deadline)
 	if err := t.internal.transport.EnqueueUnsubscribeObserverRequest(ctx, observer, observable.Identity, name, uuid); err != nil {
 		// TODO: if an error is returned, its possible that we never resolved the promise
 		return nil, err
@@ -453,4 +515,16 @@ func (m *Manager) getTransport(l cluster.Location) (*managedTransport, error) {
 		return nil, fmt.Errorf("no transport for node %s", l)
 	}
 	return t, nil
+}
+
+func encodeError(ctx context.Context, err error) []byte {
+	if err == nil {
+		return nil
+	}
+	encodedErr := errors.EncodeError(ctx, err)
+	if data, err := gogoproto.Marshal(&encodedErr); err != nil {
+		panic(err)
+	} else {
+		return data
+	}
 }
