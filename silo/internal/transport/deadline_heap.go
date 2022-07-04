@@ -21,12 +21,14 @@ type Item struct {
 }
 
 type DeadlineHeap struct {
-	h deadlineHeap
+	h           deadlineHeap
+	nowProvider func() time.Time
 }
 
 func NewDeadlineHeap() *DeadlineHeap {
 	h := &DeadlineHeap{
-		h: make(deadlineHeap, 0, 256),
+		h:           make(deadlineHeap, 0, 256),
+		nowProvider: time.Now,
 	}
 	heap.Init(&h.h)
 	return h
@@ -42,11 +44,12 @@ func (h *DeadlineHeap) ExpireAndAdd(typ RequestType, uuid string, deadline time.
 }
 
 func (h *DeadlineHeap) Expire(f func(typ RequestType, uuid string)) {
+	now := h.nowProvider()
 	for {
 		if len(h.h) == 0 {
 			return
 		}
-		if item := h.h[0]; item.deadline.Before(time.Now()) {
+		if item := h.h[0]; !item.deadline.After(now) {
 			f(item.typ, item.uuid)
 			heap.Pop(&h.h)
 		} else {
