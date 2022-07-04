@@ -331,7 +331,14 @@ func (t *transport) failSendMsg(ctx context.Context, msg *internal.TransportMess
 }
 
 func (t *transport) handleMsg(ctx context.Context, h cluster.TransportHandler, msg *internal.TransportMessage) {
-	deadline := time.UnixMilli(msg.DeadlineUnix)
+	var deadline time.Time
+
+	if msg.DeadlineUnix > 0 {
+		deadline = time.UnixMilli(msg.DeadlineUnix)
+		if deadline.Before(time.Now()) {
+			t.log.V(1).Info("dropping expired message", "deadline", deadline)
+		}
+	}
 
 	switch m := msg.Msg.(type) {
 	case *internal.TransportMessage_InvokeMethodReq:

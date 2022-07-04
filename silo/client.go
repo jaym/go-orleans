@@ -170,7 +170,7 @@ func (s *siloClientImpl) NotifyObservers(ctx context.Context, observableType str
 
 	err2 := s.transportManager.ObserverNotificationAsync(ctx, *sender, receiverAddrs, observableType, observableName, data)
 	if err2 != nil {
-		s.log.V(0).Error(err, "failed to notify grains")
+		s.log.V(0).Error(err2, "failed to notify grains")
 	}
 	return errors.CombineErrors(err2, grainAddrErrs)
 }
