@@ -121,10 +121,12 @@ func (m *GrainActivationManagerImpl) Start(ctx context.Context) error {
 	}
 
 	m.localGrainActivator = activation.NewLocalGrainActivator(
+		m.log,
 		m.registrar,
 		m.siloClient,
 		m.timerService,
 		m.resourceManager,
+		16,
 		deactivateCallback)
 	m.resourceManager.Start()
 	m.timerService.Start()

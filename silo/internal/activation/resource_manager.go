@@ -5,13 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/jaym/go-orleans/grain"
+	"github.com/jaym/go-orleans/silo/services/resourcemanager"
 )
 
 type EvictTrigger func(ident grain.Identity, onComplete func(error))
-
-var ErrNoCapacity = errors.New("No capacity")
 
 type resourceManagerEntry struct {
 	grainAddr   grain.Identity
@@ -143,7 +141,7 @@ func (r *ResourceManager) start() {
 				switch msg.msgType {
 				case resourceManagerTouchMsgType:
 					err := r.touch(msg.touch.grainAddr)
-					if err == ErrNoCapacity {
+					if err == resourcemanager.ErrNoCapacity {
 						if r.addRetryEntry(msg.touch) {
 							continue
 						}
@@ -181,7 +179,7 @@ func (r *ResourceManager) purgeRetryList() {
 	now := r.nowProvider()
 	for i < len(r.retryList) {
 		if now.After(r.retryList[i].expireAt) {
-			r.retryList[i].resp <- ErrNoCapacity
+			r.retryList[i].resp <- resourcemanager.ErrNoCapacity
 			i++
 		} else {
 			break
@@ -203,7 +201,7 @@ func (r *ResourceManager) touch(grainAddr grain.Identity) error {
 		if r.used >= r.capacity {
 			r.evict()
 
-			return ErrNoCapacity
+			return resourcemanager.ErrNoCapacity
 		}
 		entry = &resourceManagerEntry{
 			lastTouched: r.nowProvider(),

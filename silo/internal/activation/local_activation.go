@@ -2,18 +2,19 @@ package activation
 
 import (
 	"context"
-	"fmt"
 	"runtime/pprof"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/go-logr/logr"
 	"google.golang.org/protobuf/proto"
 
 	gcontext "github.com/jaym/go-orleans/context"
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"
 	"github.com/jaym/go-orleans/grain/generic"
+	"github.com/jaym/go-orleans/silo/services/resourcemanager"
 	"github.com/jaym/go-orleans/silo/services/timer"
 )
 
@@ -95,6 +96,7 @@ type LocalGrainActivation struct {
 	evictChan  chan grainActivationEvict
 	inbox      chan grainActivationMessage
 
+	log               logr.Logger
 	identity          grain.Identity
 	description       *descriptor.GrainDescription
 	activator         interface{}
@@ -103,19 +105,26 @@ type LocalGrainActivation struct {
 }
 
 type LocalGrainActivator struct {
+	log                logr.Logger
 	registrar          descriptor.Registrar
 	siloClient         grain.SiloClient
 	timerService       timer.TimerService
-	resourceManager    *ResourceManager
+	resourceManager    resourcemanager.ResourceManager
+	defaultMailboxSize int
 	deactivateCallback func(grain.Identity)
 }
 
-func NewLocalGrainActivator(registrar descriptor.Registrar, siloClient grain.SiloClient, timerService timer.TimerService, resourceManager *ResourceManager, deactivateCallback func(grain.Identity)) *LocalGrainActivator {
+func NewLocalGrainActivator(log logr.Logger, registrar descriptor.Registrar, siloClient grain.SiloClient,
+	timerService timer.TimerService, resourceManager resourcemanager.ResourceManager,
+	defaultMailboxSize int,
+	deactivateCallback func(grain.Identity)) *LocalGrainActivator {
 	return &LocalGrainActivator{
+		log:                log,
 		registrar:          registrar,
 		siloClient:         siloClient,
 		timerService:       timerService,
 		resourceManager:    resourceManager,
+		defaultMailboxSize: defaultMailboxSize,
 		deactivateCallback: deactivateCallback,
 	}
 }
@@ -136,10 +145,11 @@ func (m *LocalGrainActivator) ActivateGenericGrain(g *generic.Grain) (*LocalGrai
 
 func (m *LocalGrainActivator) activateGrain(identity grain.Identity, grainDesc *descriptor.GrainDescription, activator interface{}) (*LocalGrainActivation, error) {
 	l := &LocalGrainActivation{
+		log:            m.log.WithName("grain").WithValues("type", identity.GrainType, "id", identity.ID),
 		identity:       identity,
 		description:    grainDesc,
 		activator:      activator,
-		inbox:          make(chan grainActivationMessage, 8),
+		inbox:          make(chan grainActivationMessage, m.defaultMailboxSize),
 		evictChan:      make(chan grainActivationEvict, 1),
 		grainActivator: m,
 	}
@@ -153,7 +163,7 @@ func (g *LocalGrainActivation) findMethodDesc(name string) (*descriptor.MethodDe
 			return &g.description.Methods[i], nil
 		}
 	}
-	return nil, errors.New("method not found")
+	return nil, ErrGrainMethodNotFound
 }
 
 func (g *LocalGrainActivation) findObserableDesc(grainType, name string) (*descriptor.ObservableDesc, error) {
@@ -172,7 +182,7 @@ func (g *LocalGrainActivation) findObserableDesc(grainType, name string) (*descr
 			return &desc.Observables[i], nil
 		}
 	}
-	return nil, errors.New("observable not found")
+	return nil, ErrGrainObservableNotFound
 }
 
 func (l *LocalGrainActivation) start() {
@@ -201,7 +211,7 @@ func (l *LocalGrainActivation) loop(ctx context.Context) {
 
 	if err := l.grainActivator.resourceManager.Touch(l.identity); err != nil {
 		l.setStateDeactivating()
-		l.shutdown(ctx, ErrNoCapacity)
+		l.shutdown(ctx, resourcemanager.ErrNoCapacity)
 		return
 	}
 
@@ -342,8 +352,8 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 		req := msg.notifyObserver
 		o, err := l.findObserableDesc(req.ObservableType, req.Name)
 		if err != nil {
-			// TODO: logger
-			fmt.Printf("err: %v\n", err)
+			l.log.Error(err, "failed to find observable")
+			return
 		}
 
 		decoder := func(in interface{}) error {
@@ -354,11 +364,16 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 		defer cancel()
 
 		if genericGrain, ok := activation.(*generic.Grain); ok {
-			genericGrain.HandleNotification(req.ObservableType, req.Name, req.Sender, decoder)
+			err = genericGrain.HandleNotification(req.ObservableType, req.Name, req.Sender, decoder)
+			if err != nil {
+				l.log.Error(err, "failed to handle generic grain notification")
+				return
+			}
 		} else {
 			err = o.Handler(activation, ctx, decoder)
 			if err != nil {
-				fmt.Printf("err: %v\n", err)
+				l.log.Error(err, "failed to handle notify observer")
+				return
 			}
 		}
 
@@ -409,12 +424,12 @@ func (l *LocalGrainActivation) InvokeMethod(sender grain.Identity, method string
 	})
 }
 
-func (l *LocalGrainActivation) RegisterObserver(observer grain.Identity, observableType string, payload []byte, registrationTimeout time.Duration, resolve func(err error)) error {
+func (l *LocalGrainActivation) RegisterObserver(observer grain.Identity, observableName string, payload []byte, registrationTimeout time.Duration, resolve func(err error)) error {
 	return l.pushInbox(grainActivationMessage{
 		messageType: registerObserver,
 		registerObserver: &grainActivationRegisterObserver{
 			Observer:            observer,
-			Name:                observableType,
+			Name:                observableName,
 			ResolveFunc:         resolve,
 			RegistrationTimeout: registrationTimeout,
 			Payload:             payload,
@@ -422,12 +437,12 @@ func (l *LocalGrainActivation) RegisterObserver(observer grain.Identity, observa
 	})
 }
 
-func (l *LocalGrainActivation) UnsubscribeObserver(observer grain.Identity, observableType string, resolve func(err error)) error {
+func (l *LocalGrainActivation) UnsubscribeObserver(observer grain.Identity, observableName string, resolve func(err error)) error {
 	return l.pushInbox(grainActivationMessage{
 		messageType: unsubscribeObserver,
 		unsubscribeObserver: &grainActivationUnsubscribeObserver{
 			Observer:    observer,
-			Name:        observableType,
+			Name:        observableName,
 			ResolveFunc: resolve,
 		},
 	})
@@ -517,3 +532,5 @@ var ErrInboxFull = errors.New("inbox full")
 var ErrGrainActivationNotFound = errors.New("grain activation not found")
 var ErrGrainDeactivating = errors.New("grain is deactivating")
 var ErrGrainDeactivationRefused = errors.New("grain deactivation refused")
+var ErrGrainMethodNotFound = errors.New("grain method not found")
+var ErrGrainObservableNotFound = errors.New("grain observable not found")

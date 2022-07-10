@@ -2,6 +2,7 @@ package descriptor
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jaym/go-orleans/grain"
@@ -39,6 +40,8 @@ type MethodHandler func(srv interface{}, ctx context.Context, dec func(interface
 type ObservableHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error) error
 type RegisterObserverHandler func(srv interface{}, ctx context.Context, observer grain.Identity, registrationTimeout time.Duration, dec func(interface{}) error) error
 type UnsubscribeObserverHandler func(srv interface{}, ctx context.Context, observer grain.Identity) error
+
+var ErrGrainTypeNotFound = errors.New("grain type not found")
 
 type Registrar interface {
 	Register(desc *GrainDescription, impl interface{})
