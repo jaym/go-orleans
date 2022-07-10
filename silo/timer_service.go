@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/benbjohnson/clock"
 	"github.com/go-logr/logr"
+
 	"github.com/jaym/go-orleans/grain"
 	grainservices "github.com/jaym/go-orleans/grain/services"
 	"github.com/jaym/go-orleans/silo/services/timer"
@@ -17,6 +19,7 @@ type timerEntry struct {
 	name      string
 	d         time.Duration
 	repeat    bool
+	try       int
 
 	triggerAt time.Time
 	canceled  bool
@@ -54,22 +57,22 @@ type timerServiceImpl struct {
 	grainTimerTrigger timer.GrainTimerTrigger
 	log               logr.Logger
 
-	nowProvider func() time.Time
-	ctlChan     chan timerServiceControlMessage
-	stopChan    chan struct{}
+	clock    clock.Clock
+	ctlChan  chan timerServiceControlMessage
+	stopChan chan struct{}
 
 	timerEntries map[string]*timerEntry
 	queue        *timerEntryHeap
 }
 
-func newTimerServiceImpl(log logr.Logger, grainTimerTrigger timer.GrainTimerTrigger) timer.TimerService {
+func newTimerServiceImpl(log logr.Logger, c clock.Clock, grainTimerTrigger timer.GrainTimerTrigger) timer.TimerService {
 	ctlChan := make(chan timerServiceControlMessage)
 	queue := make(timerEntryHeap, 0, 512)
 	heap.Init(&queue)
 	s := &timerServiceImpl{
 		grainTimerTrigger: grainTimerTrigger,
 		log:               log,
-		nowProvider:       time.Now,
+		clock:             c,
 		ctlChan:           ctlChan,
 		stopChan:          make(chan struct{}),
 		timerEntries:      make(map[string]*timerEntry),
@@ -86,7 +89,7 @@ func (s *timerServiceImpl) Start() {
 func (s *timerServiceImpl) start() {
 	go func() {
 		s.log.V(3).Info("started timer service")
-		ticker := time.NewTicker(1 * time.Second)
+		ticker := s.clock.Ticker(time.Second)
 
 	LOOP:
 		for {
@@ -108,7 +111,7 @@ func (s *timerServiceImpl) start() {
 					s.log.V(0).Info("unknown ctl chan message", "type", msg.msgType)
 				}
 			case <-ticker.C:
-				now := s.nowProvider()
+				now := s.clock.Now()
 				for {
 					if len(*s.queue) == 0 {
 						s.log.V(16).Info("nothing to trigger: none available")
@@ -122,10 +125,32 @@ func (s *timerServiceImpl) start() {
 					v := heap.Pop(s.queue).(*timerEntry)
 					if !v.canceled {
 						s.log.V(4).Info("triggering grain", "identity", v.grainAddr, "triggerName", v.name)
-						s.grainTimerTrigger(v.grainAddr, v.name)
-						if v.repeat {
-							s.log.V(4).Info("reregistering timer", "identity", v.grainAddr, "triggerName", v.name)
-							v.triggerAt = s.nowProvider().Add(v.d)
+						retry := s.grainTimerTrigger(v.grainAddr, v.name, v.try)
+						if v.repeat && retry {
+							s.log.V(4).Info("retrying ticker", "identity", v.grainAddr, "triggerName", v.name)
+
+							nextTriggerTime := now.Add(v.d)
+							nextRetryTime := s.retryBackoffTime(v, now)
+							if nextRetryTime.Before(nextTriggerTime) {
+								v.triggerAt = nextRetryTime
+							} else {
+								v.triggerAt = nextTriggerTime
+							}
+							v.try++
+
+							heap.Push(s.queue, v)
+							continue
+						} else if v.repeat {
+							s.log.V(4).Info("reregistering ticker", "identity", v.grainAddr, "triggerName", v.name)
+							v.triggerAt = now.Add(v.d)
+							v.try = 0
+							heap.Push(s.queue, v)
+							continue
+						} else if retry {
+							v.triggerAt = s.retryBackoffTime(v, now)
+							v.try++
+
+							s.log.V(4).Info("retrying timer", "identity", v.grainAddr, "triggerName", v.name)
 							heap.Push(s.queue, v)
 							continue
 						}
@@ -139,6 +164,14 @@ func (s *timerServiceImpl) start() {
 		ticker.Stop()
 		close(s.stopChan)
 	}()
+}
+
+func (*timerServiceImpl) retryBackoffTime(v *timerEntry, now time.Time) time.Time {
+	backoff := (1 << v.try)
+	if backoff > 60 {
+		backoff = 60
+	}
+	return now.Add(time.Duration(backoff) * time.Second)
 }
 
 func (s *timerServiceImpl) Stop(ctx context.Context) error {
@@ -207,7 +240,7 @@ func (s *timerServiceImpl) register(ident grain.Identity, name string, d time.Du
 	entry := &timerEntry{
 		grainAddr: ident,
 		name:      name,
-		triggerAt: s.nowProvider().Add(d),
+		triggerAt: s.clock.Now().Add(d),
 		repeat:    repeat,
 		d:         d,
 	}
@@ -255,41 +288,4 @@ func (h *timerEntryHeap) Pop() interface{} {
 	x := old[n-1]
 	*h = old[0 : n-1]
 	return x
-}
-
-type grainTimerServiceImpl struct {
-	grainIdentity grain.Identity
-	timerService  timer.TimerService
-	timers        map[string]func()
-}
-
-func (g *grainTimerServiceImpl) RegisterTimer(name string, d time.Duration, f func()) error {
-	if err := g.timerService.RegisterTimer(g.grainIdentity, name, d); err != nil {
-		return err
-	}
-	g.timers[name] = f
-	return nil
-}
-
-func (g *grainTimerServiceImpl) RegisterTicker(name string, d time.Duration, f func()) error {
-	if err := g.timerService.RegisterTicker(g.grainIdentity, name, d); err != nil {
-		return err
-	}
-	g.timers[name] = f
-	return nil
-}
-
-func (g *grainTimerServiceImpl) Trigger(name string) {
-	if f, ok := g.timers[name]; ok {
-		delete(g.timers, name)
-		f()
-	}
-}
-
-func (g *grainTimerServiceImpl) Cancel(name string) bool {
-	if _, ok := g.timers[name]; ok {
-		delete(g.timers, name)
-		return g.timerService.Cancel(g.grainIdentity, name)
-	}
-	return false
 }

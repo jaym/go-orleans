@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/benbjohnson/clock"
 	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
 	"github.com/hashicorp/go-multierror"
@@ -29,6 +30,7 @@ type Silo struct {
 	discovery          cluster.Discovery
 	membershipProtocol cluster.MembershipProtocol
 	transportFactory   cluster.TransportFactory
+	clock              clock.Clock
 }
 
 func NewSilo(log logr.Logger, opts ...SiloOption) *Silo {
@@ -49,6 +51,7 @@ func NewSilo(log logr.Logger, opts ...SiloOption) *Silo {
 		discovery:          options.Discovery(),
 		membershipProtocol: options.MembershipProtocol(),
 		transportFactory:   options.TransportFactory(),
+		clock:              clock.New(),
 	}
 	// TODO: do something a little more sensible. With the generic
 	// grain, it is expected to pass in an activator for each
@@ -60,7 +63,7 @@ func NewSilo(log logr.Logger, opts ...SiloOption) *Silo {
 		nodeName:       s.nodeName,
 		grainDirectory: s.grainDirectory,
 	}
-	s.timerService = newTimerServiceImpl(s.log.WithName("timerService"), func(grainAddr grain.Identity, name string) {
+	s.timerService = newTimerServiceImpl(s.log.WithName("timerService"), s.clock, func(grainAddr grain.Identity, name string, try int) bool {
 		err := s.localGrainManager.EnqueueTimerTrigger(TimerTriggerNotification{
 			Receiver: grainAddr,
 			Name:     name,
@@ -68,8 +71,18 @@ func NewSilo(log logr.Logger, opts ...SiloOption) *Silo {
 		if err != nil {
 			if !(errors.Is(err, ErrGrainActivationNotFound) || errors.Is(err, ErrGrainDeactivating)) {
 				s.log.V(1).Error(err, "failed to trigger timer notification", "identity", grainAddr, "triggerName", name)
+				if errors.Is(err, ErrInboxFull) {
+					if try < 10 {
+						return true
+					} else {
+						s.log.V(0).Error(err, "failed to trigger too many times", "identity", grainAddr, "triggerName", name, "try", try)
+						return false
+						// TODO: panic grain
+					}
+				}
 			}
 		}
+		return false
 	})
 	s.localGrainManager = NewGrainActivationManager(
 		s.log.WithName("activation-manager"),
