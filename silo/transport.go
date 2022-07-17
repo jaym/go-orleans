@@ -4,10 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
-	gogoproto "github.com/gogo/protobuf/proto"
-	"github.com/jaym/go-orleans/future"
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/plugins/codec"
 	"github.com/jaym/go-orleans/silo/internal/transport"
@@ -20,7 +17,7 @@ type siloTransportHandler struct {
 	localGrainManager *GrainActivationManagerImpl
 }
 
-func (s siloTransportHandler) ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, payload []byte, promise future.Promise[transport.InvokeMethodResponse]) {
+func (s siloTransportHandler) ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, payload []byte, promise transport.InvokeMethodPromise) {
 	err := s.localGrainManager.EnqueueInvokeMethodRequest(InvokeMethodRequest{
 		Sender:   sender,
 		Receiver: receiver,
@@ -57,27 +54,15 @@ func (s siloTransportHandler) ReceiveRegisterObserverRequest(ctx context.Context
 		RegistrationTimeout: registrationTimeout,
 		ResolveFunc: func(e error) {
 			if e != nil {
-				promise.Resolve(encodeError(ctx, e))
+				promise.Reject(e)
 			} else {
-				promise.Resolve(nil)
+				promise.Resolve(transport.RegisterObserverResponse{})
 			}
 		},
 	})
 	if err != nil {
-		promise.Resolve(encodeError(ctx, err))
+		promise.Reject(err)
 		s.log.Error(err, "failed to enqueue register observer", "observer", observer, "observable", observable, "name", name)
-	}
-}
-
-func encodeError(ctx context.Context, err error) []byte {
-	if err == nil {
-		return nil
-	}
-	encodedErr := errors.EncodeError(ctx, err)
-	if data, err := gogoproto.Marshal(&encodedErr); err != nil {
-		panic(err)
-	} else {
-		return data
 	}
 }
 
@@ -101,14 +86,14 @@ func (s siloTransportHandler) ReceiveUnsubscribeObserverRequest(ctx context.Cont
 		Name:       name,
 		ResolveFunc: func(e error) {
 			if e != nil {
-				promise.Resolve(encodeError(ctx, e))
+				promise.Reject(e)
 			} else {
-				promise.Resolve(nil)
+				promise.Resolve(transport.UnsubscribeObserverResponse{})
 			}
 		},
 	})
 	if err != nil {
-		promise.Resolve(encodeError(ctx, err))
+		promise.Reject(err)
 		s.log.Error(err, "failed to enqueue unregister observer", "observer", observer, "observable", observable, "name", name)
 	}
 }

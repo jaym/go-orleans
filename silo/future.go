@@ -3,9 +3,7 @@ package silo
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-	"github.com/gogo/protobuf/proto"
-
+	"github.com/jaym/go-orleans/future"
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/plugins/codec"
 	"github.com/jaym/go-orleans/silo/internal/transport"
@@ -49,34 +47,22 @@ func (f invokeMethodFailedFuture) Await(ctx context.Context) (grain.InvokeMethod
 	return nil, f.err
 }
 
-type RegisterObserverResp struct {
-	Err error
+type unitFuture[T any] struct {
+	f future.Future[T]
 }
 
-type registerObserverFuture struct {
-	codec codec.Codec
-	f     transport.RegisterObserverFuture
-}
-
-func newRegisterObserverFuture(codec codec.Codec, f transport.RegisterObserverFuture) *registerObserverFuture {
-	return &registerObserverFuture{
-		codec: codec,
-		f:     f,
+func newUnitFuture[T any](codec codec.Codec, f future.Future[T]) *unitFuture[T] {
+	return &unitFuture[T]{
+		f: f,
 	}
 }
 
-func (f *registerObserverFuture) Await(ctx context.Context) error {
-	errData, err := f.f.Await(ctx)
+func (f *unitFuture[T]) Await(ctx context.Context) error {
+	_, err := f.f.Await(ctx)
 	if err != nil {
 		return err
 	}
-	if len(errData) > 0 {
-		var encodedError errors.EncodedError
-		if err := proto.Unmarshal(errData, &encodedError); err != nil {
-			return err
-		}
-		return errors.DecodeError(ctx, encodedError)
-	}
+
 	return nil
 }
 

@@ -110,7 +110,7 @@ func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer grain.Id
 		return registerObserverFailedFuture{err: err}
 	}
 
-	return newRegisterObserverFuture(s.codec, f)
+	return newUnitFuture(s.codec, f)
 }
 
 func (s *siloClientImpl) UnsubscribeObserver(ctx context.Context, observer grain.Identity, observable grain.Identity,
@@ -131,7 +131,7 @@ func (s *siloClientImpl) UnsubscribeObserver(ctx context.Context, observer grain
 		return registerObserverFailedFuture{err: err}
 	}
 
-	return newRegisterObserverFuture(s.codec, f)
+	return newUnitFuture(s.codec, f)
 }
 
 func (s *siloClientImpl) NotifyObservers(ctx context.Context, observableType string, observableName string,

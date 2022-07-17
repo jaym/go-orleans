@@ -33,10 +33,6 @@ func NewManager(log logr.Logger, handler TransportHandler) *Manager {
 	}
 }
 
-type InvokeMethodResponse struct {
-	Response []byte
-}
-
 type TransportHandler interface {
 	ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, payload []byte, promise InvokeMethodPromise)
 	ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, payload []byte, registrationTimeout time.Duration, promise RegisterObserverPromise)
@@ -44,61 +40,23 @@ type TransportHandler interface {
 	ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, promise UnsubscribeObserverPromise)
 }
 
-type RegisterObserverPromise interface {
-	Resolve(errData []byte)
-	Deadline() time.Time
-}
-
-type RegisterObserverFuture interface {
-	Await(ctx context.Context) (errData []byte, err error)
-}
-
-type observerFuncPromise struct {
-	deadline time.Time
-	f        func(err []byte)
-}
-
-func (p observerFuncPromise) Resolve(errData []byte) {
-	if len(errData) > 0 {
-		p.f(errData)
-	} else {
-		p.f(nil)
-	}
-}
-
-func (p observerFuncPromise) Deadline() time.Time {
-	return p.deadline
-}
-
-type observerChanFuture struct {
-	c chan struct {
-		errData []byte
-	}
-}
-
-func (f observerChanFuture) Await(ctx context.Context) ([]byte, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case v := <-f.c:
-		return v.errData, nil
-	}
-}
-
-type UnsubscribeObserverPromise interface {
-	Resolve(errData []byte)
-}
-
-type UnsubscribeObserverFuture interface {
-	Await(ctx context.Context) (errData []byte, err error)
-}
-
 type managedTransport struct {
 	internal *managedTransportInternal
 }
 
+type InvokeMethodResponse struct {
+	Response []byte
+}
 type InvokeMethodPromise = future.Promise[InvokeMethodResponse]
 type InvokeMethodFuture = future.Future[InvokeMethodResponse]
+
+type RegisterObserverResponse struct{}
+type RegisterObserverPromise = future.Promise[RegisterObserverResponse]
+type RegisterObserverFuture = future.Future[RegisterObserverResponse]
+
+type UnsubscribeObserverResponse struct{}
+type UnsubscribeObserverPromise = future.Promise[UnsubscribeObserverResponse]
+type UnsubscribeObserverFuture = future.Future[UnsubscribeObserverResponse]
 
 type managedTransportInternal struct {
 	TransportHandler
@@ -150,14 +108,12 @@ func (h *managedTransportInternal) stop() error {
 	h.invokeMethodPromises = nil
 
 	for _, p := range h.registerObserverPromises {
-		// TODO: better error handling
-		p.Resolve([]byte("transport stopped"))
+		p.Reject(ErrTransportStopped)
 	}
 	h.registerObserverPromises = nil
 
 	for _, p := range h.unsubscribeObserverPromises {
-		// TODO: better error handling
-		p.Resolve([]byte("transport stopped"))
+		p.Reject(ErrTransportStopped)
 	}
 	h.unsubscribeObserverPromises = nil
 
@@ -167,21 +123,12 @@ func (h *managedTransportInternal) stop() error {
 }
 
 func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string, deadline time.Time) RegisterObserverFuture {
-	f := observerChanFuture{
-		c: make(chan struct {
-			errData []byte
-		}, 1),
-	}
-	p := observerFuncPromise{
-		deadline: deadline,
-		f: func(errData []byte) {
-			f.c <- struct{ errData []byte }{errData: errData}
-		},
-	}
+
+	f, p := future.NewFuture[RegisterObserverResponse](deadline)
 	h.lock.Lock()
 	defer h.lock.Unlock()
 	if h.stopped {
-		p.Resolve([]byte("transport stopped"))
+		p.Reject(ErrTransportStopped)
 	} else {
 		h.deadlineHeap.ExpireAndAdd(RegisterObserverRequestType, uuid, deadline, h.expirePromises)
 		h.registerObserverPromises[uuid] = p
@@ -189,22 +136,12 @@ func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string, 
 	return f
 }
 
-func (h *managedTransportInternal) registerUnsubscribeObserverPromise(uuid string, deadline time.Time) RegisterObserverFuture {
-	f := observerChanFuture{
-		c: make(chan struct {
-			errData []byte
-		}, 1),
-	}
-	p := observerFuncPromise{
-		deadline: deadline,
-		f: func(errData []byte) {
-			f.c <- struct{ errData []byte }{errData: errData}
-		},
-	}
+func (h *managedTransportInternal) registerUnsubscribeObserverPromise(uuid string, deadline time.Time) UnsubscribeObserverFuture {
+	f, p := future.NewFuture[UnsubscribeObserverResponse](deadline)
 	h.lock.Lock()
 	defer h.lock.Unlock()
 	if h.stopped {
-		p.Resolve([]byte("transport stopped"))
+		p.Reject(ErrTransportStopped)
 	} else {
 		h.deadlineHeap.ExpireAndAdd(UnregisterObserverRequestType, uuid, deadline, h.expirePromises)
 		h.unsubscribeObserverPromises[uuid] = p
@@ -222,12 +159,12 @@ func (h *managedTransportInternal) expirePromises(typ RequestType, uuid string) 
 		}
 	case RegisterObserverRequestType:
 		if p, ok := h.registerObserverPromises[uuid]; ok {
-			p.Resolve(encodeError(context.DeadlineExceeded))
+			p.Reject(context.DeadlineExceeded)
 			delete(h.registerObserverPromises, uuid)
 		}
 	case UnregisterObserverRequestType:
 		if p, ok := h.unsubscribeObserverPromises[uuid]; ok {
-			p.Resolve(encodeError(context.DeadlineExceeded))
+			p.Reject(context.DeadlineExceeded)
 			delete(h.unsubscribeObserverPromises, uuid)
 		}
 	}
@@ -255,7 +192,7 @@ func (h *managedTransportInternal) ReceiveAckRegisterObserver(ctx context.Contex
 		h.log.V(1).Info("promise not found", "handler", "ack-register-observer", "receiver", receiver, "uuid", uuid)
 		return
 	}
-	p.Resolve(errData)
+	rejectOrResolve(p, errData, RegisterObserverResponse{})
 	delete(h.invokeMethodPromises, uuid)
 }
 
@@ -268,19 +205,9 @@ func (h *managedTransportInternal) ReceiveInvokeMethodResponse(ctx context.Conte
 		h.log.V(1).Info("promise not found", "handler", "invoke-method-response", "receiver", receiver, "uuid", uuid)
 		return
 	}
-	if len(errData) > 0 {
-		var encodedError errors.EncodedError
-		if err := gogoproto.Unmarshal(errData, &encodedError); err != nil {
-			p.Reject(err)
-			return
-		}
-		decodedErr := errors.DecodeError(ctx, encodedError)
-		p.Reject(decodedErr)
-	} else {
-		p.Resolve(InvokeMethodResponse{
-			Response: payload,
-		})
-	}
+	rejectOrResolve(p, errData, InvokeMethodResponse{
+		Response: payload,
+	})
 
 	delete(h.invokeMethodPromises, uuid)
 }
@@ -298,32 +225,28 @@ func (h *managedTransportInternal) ReceiveInvokeMethodRequest(ctx context.Contex
 }
 
 func (h *managedTransportInternal) ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte, opts cluster.EnqueueRegisterObserverRequestOptions, deadline time.Time) {
-	p := observerFuncPromise{
-		deadline: deadline,
-		f: func(errOut []byte) {
-			if err := h.transport.EnqueueAckRegisterObserver(context.TODO(), observer, uuid, errOut); err != nil {
-				h.log.V(0).Error(err, "failed to response to ack observer registration",
-					"observer", observer,
-					"observable", observable,
-					"name", name,
-					"uuid", uuid)
-			}
-		}}
+	p := future.NewFuncPromise(deadline, func(_ RegisterObserverResponse, e error) {
+		if err := h.transport.EnqueueAckRegisterObserver(context.TODO(), observer, uuid, encodeError(e)); err != nil {
+			h.log.V(0).Error(err, "failed to response to ack observer registration",
+				"observer", observer,
+				"observable", observable,
+				"name", name,
+				"uuid", uuid)
+		}
+	})
 	h.TransportHandler.ReceiveRegisterObserverRequest(ctx, observer, observable, name, payload, opts.RegistrationTimeout, p)
 }
 
 func (h *managedTransportInternal) ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, deadline time.Time) {
-	p := observerFuncPromise{
-		deadline: deadline,
-		f: func(errOut []byte) {
-			if err := h.transport.EnqueueAckUnsubscribeObserver(context.TODO(), observer, uuid, errOut); err != nil {
-				h.log.V(0).Error(err, "failed to response to ack unsubscribe observer",
-					"observer", observer,
-					"observable", observable,
-					"name", name,
-					"uuid", uuid)
-			}
-		}}
+	p := future.NewFuncPromise(deadline, func(_ UnsubscribeObserverResponse, e error) {
+		if err := h.transport.EnqueueAckUnsubscribeObserver(context.TODO(), observer, uuid, encodeError(e)); err != nil {
+			h.log.V(0).Error(err, "failed to response to ack unsubscribe observer",
+				"observer", observer,
+				"observable", observable,
+				"name", name,
+				"uuid", uuid)
+		}
+	})
 	h.TransportHandler.ReceiveUnsubscribeObserverRequest(ctx, observer, observable, name, p)
 }
 
@@ -336,7 +259,7 @@ func (h *managedTransportInternal) ReceiveAckUnsubscribeObserver(ctx context.Con
 		h.log.V(1).Info("promise not found", "handler", "ack-register-observer", "receiver", receiver, "uuid", uuid)
 		return
 	}
-	p.Resolve(errData)
+	rejectOrResolve(p, errData, UnsubscribeObserverResponse{})
 	delete(h.invokeMethodPromises, uuid)
 }
 
@@ -490,5 +413,19 @@ func encodeError(err error) []byte {
 		panic(err)
 	} else {
 		return data
+	}
+}
+
+func rejectOrResolve[T any](p future.Promise[T], errData []byte, val T) {
+	if len(errData) > 0 {
+		var encodedError errors.EncodedError
+		if err := gogoproto.Unmarshal(errData, &encodedError); err != nil {
+			p.Reject(err)
+			return
+		}
+		decodedErr := errors.DecodeError(context.Background(), encodedError)
+		p.Reject(decodedErr)
+	} else {
+		p.Resolve(val)
 	}
 }
