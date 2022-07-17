@@ -224,6 +224,8 @@ func TestActivationGrainActivatorFailureWithCalls(t *testing.T) {
 		defer wg.Done()
 		assert.Equal(t, expectedErr, err)
 	})
+	require.NoError(t, err)
+
 	err = a.RegisterObserver(grain.Anonymous(), "Fake", []byte{}, time.Minute, func(err error) {
 		defer wg.Done()
 		assert.Equal(t, expectedErr, err)
@@ -479,7 +481,6 @@ type evictable struct {
 func (e *evictable) Deactivate(ctx context.Context) {
 	close(e.entered)
 	<-e.waitFor
-	return
 }
 
 func TestActivationGrainDeactivateOnEvict(t *testing.T) {
