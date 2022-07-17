@@ -151,10 +151,11 @@ func (h *managedTransportInternal) backgroundCleanupWorker(ctx context.Context) 
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
+	LOOP:
 		for {
 			select {
 			case <-ctx.Done():
-				break
+				break LOOP
 			case <-ticker.C:
 				func() {
 					h.lock.Lock()
