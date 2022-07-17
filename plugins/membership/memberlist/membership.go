@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/hashicorp/memberlist"
-	hmemberlist "github.com/hashicorp/memberlist"
 
 	"github.com/jaym/go-orleans/silo/services/cluster"
 )
@@ -19,7 +18,7 @@ type MembershipProtocol struct {
 	membershipPort int
 	wg             sync.WaitGroup
 	closeChan      chan struct{}
-	memberlist     *hmemberlist.Memberlist
+	memberlist     *memberlist.Memberlist
 	nodeMetadata   *nodeMetadata
 }
 
@@ -53,7 +52,7 @@ func New(log logr.Logger, nodeName cluster.Location, membershipPort int, rpcPort
 }
 
 func (m *MembershipProtocol) Start(ctx context.Context, d cluster.MembershipDelegate) error {
-	config := hmemberlist.DefaultLANConfig()
+	config := memberlist.DefaultLANConfig()
 	ch := make(chan memberlist.NodeEvent, 8)
 	config.Events = &channelEventDelegate{
 		Ch: ch,
@@ -61,7 +60,7 @@ func (m *MembershipProtocol) Start(ctx context.Context, d cluster.MembershipDele
 	config.BindPort = int(m.membershipPort)
 	config.Name = string(m.nodeName)
 	config.Delegate = m.nodeMetadata
-	list, err := hmemberlist.Create(config)
+	list, err := memberlist.Create(config)
 	if err != nil {
 		return err
 	}
@@ -145,24 +144,24 @@ func (m *MembershipProtocol) ListMembers() ([]cluster.Node, error) {
 }
 
 type channelEventDelegate struct {
-	Ch chan<- hmemberlist.NodeEvent
+	Ch chan<- memberlist.NodeEvent
 }
 
-func (c *channelEventDelegate) NotifyJoin(n *hmemberlist.Node) {
+func (c *channelEventDelegate) NotifyJoin(n *memberlist.Node) {
 	node := *n
 	select {
-	case c.Ch <- hmemberlist.NodeEvent{
-		Event: hmemberlist.NodeJoin,
+	case c.Ch <- memberlist.NodeEvent{
+		Event: memberlist.NodeJoin,
 		Node:  &node}:
 	default:
 	}
 }
 
-func (c *channelEventDelegate) NotifyLeave(n *hmemberlist.Node) {
+func (c *channelEventDelegate) NotifyLeave(n *memberlist.Node) {
 	node := *n
 	select {
-	case c.Ch <- hmemberlist.NodeEvent{
-		Event: hmemberlist.NodeLeave,
+	case c.Ch <- memberlist.NodeEvent{
+		Event: memberlist.NodeLeave,
 		Node:  &node}:
 	default:
 	}
