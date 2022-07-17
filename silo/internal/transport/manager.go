@@ -214,7 +214,7 @@ func (h *managedTransportInternal) ReceiveInvokeMethodResponse(ctx context.Conte
 
 func (h *managedTransportInternal) ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, uuid string, payload []byte, deadline time.Time) {
 	p := future.NewFuncPromise(deadline, func(imr InvokeMethodResponse, errIn error) {
-		if err := h.transport.EnqueueInvokeMethodResponse(context.TODO(), sender, uuid, payload, encodeError(errIn)); err != nil {
+		if err := h.transport.EnqueueInvokeMethodResponse(context.TODO(), sender, uuid, imr.Response, encodeError(errIn)); err != nil {
 			h.log.V(0).Error(err, "failed to response to invoke method request",
 				"sender", sender,
 				"receiver", receiver,
