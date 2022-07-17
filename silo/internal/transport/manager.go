@@ -11,6 +11,7 @@ import (
 	"github.com/go-logr/logr"
 	gogoproto "github.com/gogo/protobuf/proto"
 
+	"github.com/jaym/go-orleans/future"
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/silo/services/cluster"
 )
@@ -32,53 +33,15 @@ func NewManager(log logr.Logger, handler TransportHandler) *Manager {
 	}
 }
 
+type InvokeMethodResponse struct {
+	Response []byte
+}
+
 type TransportHandler interface {
 	ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, payload []byte, promise InvokeMethodPromise)
 	ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, payload []byte, registrationTimeout time.Duration, promise RegisterObserverPromise)
 	ReceiveObserverNotification(ctx context.Context, sender grain.Identity, receivers []grain.Identity, observableType string, name string, payload []byte)
 	ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, promise UnsubscribeObserverPromise)
-}
-
-type InvokeMethodPromise interface {
-	Resolve(payload []byte, errData []byte)
-	Deadline() time.Time
-}
-
-type invokeMethodFuncPromise struct {
-	deadline time.Time
-	f        func(payload []byte, err []byte)
-}
-
-func (p invokeMethodFuncPromise) Resolve(payload []byte, errData []byte) {
-	if len(errData) > 0 {
-		p.f(nil, errData)
-	} else {
-		p.f(payload, nil)
-	}
-}
-
-func (p invokeMethodFuncPromise) Deadline() time.Time {
-	return p.deadline
-}
-
-type invokeMethodChanFuture struct {
-	c chan struct {
-		payload []byte
-		errData []byte
-	}
-}
-
-func (f invokeMethodChanFuture) Await(ctx context.Context) ([]byte, []byte, error) {
-	select {
-	case <-ctx.Done():
-		return nil, nil, ctx.Err()
-	case v := <-f.c:
-		return v.payload, v.errData, nil
-	}
-}
-
-type InvokeMethodFuture interface {
-	Await(ctx context.Context) (payload []byte, errData []byte, err error)
 }
 
 type RegisterObserverPromise interface {
@@ -134,6 +97,9 @@ type managedTransport struct {
 	internal *managedTransportInternal
 }
 
+type InvokeMethodPromise = future.Promise[InvokeMethodResponse]
+type InvokeMethodFuture = future.Future[InvokeMethodResponse]
+
 type managedTransportInternal struct {
 	TransportHandler
 	log                         logr.Logger
@@ -170,6 +136,8 @@ func (h *managedTransportInternal) backgroundCleanupWorker(ctx context.Context) 
 	}()
 }
 
+var ErrTransportStopped = errors.New("transport stopped")
+
 func (h *managedTransportInternal) stop() error {
 	errTransportStop := h.transport.Stop()
 	h.bgWorkerCancel()
@@ -177,8 +145,7 @@ func (h *managedTransportInternal) stop() error {
 	defer h.lock.Unlock()
 
 	for _, p := range h.invokeMethodPromises {
-		// TODO: better error handling
-		p.Resolve(nil, []byte("transport stopped"))
+		p.Reject(ErrTransportStopped)
 	}
 	h.invokeMethodPromises = nil
 
@@ -250,42 +217,28 @@ func (h *managedTransportInternal) expirePromises(typ RequestType, uuid string) 
 	switch typ {
 	case InvokeMethodRequestType:
 		if p, ok := h.invokeMethodPromises[uuid]; ok {
-			p.Resolve(nil, encodeError(context.Background(), context.DeadlineExceeded))
+			p.Reject(context.DeadlineExceeded)
 			delete(h.invokeMethodPromises, uuid)
 		}
 	case RegisterObserverRequestType:
 		if p, ok := h.registerObserverPromises[uuid]; ok {
-			p.Resolve(encodeError(context.Background(), context.DeadlineExceeded))
+			p.Resolve(encodeError(context.DeadlineExceeded))
 			delete(h.registerObserverPromises, uuid)
 		}
 	case UnregisterObserverRequestType:
 		if p, ok := h.unsubscribeObserverPromises[uuid]; ok {
-			p.Resolve(encodeError(context.Background(), context.DeadlineExceeded))
+			p.Resolve(encodeError(context.DeadlineExceeded))
 			delete(h.unsubscribeObserverPromises, uuid)
 		}
 	}
 }
 
 func (h *managedTransportInternal) registerInvokeMethodPromise(uuid string, deadline time.Time) InvokeMethodFuture {
-	f := invokeMethodChanFuture{
-		c: make(chan struct {
-			payload []byte
-			errData []byte
-		}, 1),
-	}
-	p := invokeMethodFuncPromise{
-		deadline: deadline,
-		f: func(payload []byte, errData []byte) {
-			f.c <- struct {
-				payload []byte
-				errData []byte
-			}{payload: payload, errData: errData}
-		},
-	}
+	f, p := future.NewFuture[InvokeMethodResponse](deadline)
 	h.lock.Lock()
 	defer h.lock.Unlock()
 	if h.stopped {
-		p.Resolve(nil, []byte("transport stopped"))
+		p.Reject(ErrTransportStopped)
 	} else {
 		h.deadlineHeap.ExpireAndAdd(InvokeMethodRequestType, uuid, deadline, h.expirePromises)
 		h.invokeMethodPromises[uuid] = p
@@ -315,22 +268,32 @@ func (h *managedTransportInternal) ReceiveInvokeMethodResponse(ctx context.Conte
 		h.log.V(1).Info("promise not found", "handler", "invoke-method-response", "receiver", receiver, "uuid", uuid)
 		return
 	}
-	p.Resolve(payload, errData)
+	if len(errData) > 0 {
+		var encodedError errors.EncodedError
+		if err := gogoproto.Unmarshal(errData, &encodedError); err != nil {
+			p.Reject(err)
+			return
+		}
+		decodedErr := errors.DecodeError(ctx, encodedError)
+		p.Reject(decodedErr)
+	} else {
+		p.Resolve(InvokeMethodResponse{
+			Response: payload,
+		})
+	}
 
 	delete(h.invokeMethodPromises, uuid)
 }
 
 func (h *managedTransportInternal) ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, uuid string, payload []byte, deadline time.Time) {
-	p := invokeMethodFuncPromise{
-		deadline: deadline,
-		f: func(payload []byte, err []byte) {
-			if err := h.transport.EnqueueInvokeMethodResponse(context.TODO(), sender, uuid, payload, err); err != nil {
-				h.log.V(0).Error(err, "failed to response to invoke method request",
-					"sender", sender,
-					"receiver", receiver,
-					"method", method, "uuid", uuid)
-			}
-		}}
+	p := future.NewFuncPromise(deadline, func(imr InvokeMethodResponse, errIn error) {
+		if err := h.transport.EnqueueInvokeMethodResponse(context.TODO(), sender, uuid, payload, encodeError(errIn)); err != nil {
+			h.log.V(0).Error(err, "failed to response to invoke method request",
+				"sender", sender,
+				"receiver", receiver,
+				"method", method, "uuid", uuid)
+		}
+	})
 	h.TransportHandler.ReceiveInvokeMethodRequest(ctx, sender, receiver, method, payload, p)
 }
 
@@ -518,11 +481,11 @@ func (m *Manager) getTransport(l cluster.Location) (*managedTransport, error) {
 	return t, nil
 }
 
-func encodeError(ctx context.Context, err error) []byte {
+func encodeError(err error) []byte {
 	if err == nil {
 		return nil
 	}
-	encodedErr := errors.EncodeError(ctx, err)
+	encodedErr := errors.EncodeError(context.Background(), err)
 	if data, err := gogoproto.Marshal(&encodedErr); err != nil {
 		panic(err)
 	} else {

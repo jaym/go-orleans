@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
 	gogoproto "github.com/gogo/protobuf/proto"
+	"github.com/jaym/go-orleans/future"
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/plugins/codec"
 	"github.com/jaym/go-orleans/silo/internal/transport"
@@ -19,7 +20,7 @@ type siloTransportHandler struct {
 	localGrainManager *GrainActivationManagerImpl
 }
 
-func (s siloTransportHandler) ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, payload []byte, promise transport.InvokeMethodPromise) {
+func (s siloTransportHandler) ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, payload []byte, promise future.Promise[transport.InvokeMethodResponse]) {
 	err := s.localGrainManager.EnqueueInvokeMethodRequest(InvokeMethodRequest{
 		Sender:   sender,
 		Receiver: receiver,
@@ -28,15 +29,21 @@ func (s siloTransportHandler) ReceiveInvokeMethodRequest(ctx context.Context, se
 		deadline: promise.Deadline(),
 		ResolveFunc: func(i interface{}, e error) {
 			if e != nil {
-				promise.Resolve(nil, encodeError(ctx, e))
+				promise.Reject(e)
 			} else {
 				data, err := s.codec.Encode(i)
-				promise.Resolve(data, encodeError(ctx, err))
+				if err != nil {
+					promise.Reject(err)
+				} else {
+					promise.Resolve(transport.InvokeMethodResponse{
+						Response: data,
+					})
+				}
 			}
 		},
 	})
 	if err != nil {
-		promise.Resolve(nil, encodeError(ctx, err))
+		promise.Reject(err)
 		s.log.Error(err, "failed to enqueue invoke method", "sender", sender, "receiver", receiver, "method", method)
 	}
 }
