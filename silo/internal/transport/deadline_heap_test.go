@@ -5,32 +5,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benbjohnson/clock"
 	"github.com/stretchr/testify/require"
 )
 
 func TestDeadlineHeap(t *testing.T) {
-	now := time.Now()
+	c := clock.NewMock()
 
 	t.Run("starts off with nothing to expire", func(t *testing.T) {
-		h := NewDeadlineHeap()
-		h.nowProvider = func() time.Time {
-			return now
-		}
-
-		now = time.Now().Add(1000 * time.Hour)
+		h := NewDeadlineHeap(c)
+		c.Add(1000 * time.Hour)
 		h.Expire(func(typ RequestType, uuid string) {
 			require.Fail(t, "there sould be nothing to expire")
 		})
 	})
 
 	t.Run("expires before add", func(t *testing.T) {
-		h := NewDeadlineHeap()
-		h.nowProvider = func() time.Time {
-			return now
-		}
+		h := NewDeadlineHeap(c)
 
-		now = time.Now()
-		deadline := now.Add(-1 * time.Hour)
+		deadline := c.Now().Add(-1 * time.Hour)
 		h.ExpireAndAdd(RegisterObserverRequestType, "uuid1", deadline, func(typ RequestType, uuid string) {
 			require.Fail(t, "there sould be nothing to expire")
 		})
@@ -46,13 +39,9 @@ func TestDeadlineHeap(t *testing.T) {
 	})
 
 	t.Run("boundary conditions", func(t *testing.T) {
-		h := NewDeadlineHeap()
-		h.nowProvider = func() time.Time {
-			return now
-		}
+		h := NewDeadlineHeap(c)
 
-		now = time.Now()
-		h.ExpireAndAdd(RegisterObserverRequestType, "uuid1", now, func(typ RequestType, uuid string) {
+		h.ExpireAndAdd(RegisterObserverRequestType, "uuid1", c.Now(), func(typ RequestType, uuid string) {
 			require.Fail(t, "there sould be nothing to expire")
 		})
 		expired := false
@@ -67,14 +56,10 @@ func TestDeadlineHeap(t *testing.T) {
 	})
 
 	t.Run("stress", func(t *testing.T) {
-		h := NewDeadlineHeap()
-		h.nowProvider = func() time.Time {
-			return now
-		}
+		h := NewDeadlineHeap(c)
 
-		now = time.Now()
-		deadline1 := now.Add(time.Minute)
-		deadline2 := now.Add(2 * time.Minute)
+		deadline1 := c.Now().Add(time.Minute)
+		deadline2 := c.Now().Add(2 * time.Minute)
 		numDeadlines := 1000
 		interval := time.Minute / time.Duration(numDeadlines+1)
 
@@ -83,7 +68,7 @@ func TestDeadlineHeap(t *testing.T) {
 			h.ExpireAndAdd(
 				RequestType(i%3+1),
 				"uuid-1-"+strconv.Itoa(i),
-				now.Add(time.Duration(i+1)*interval),
+				c.Now().Add(time.Duration(i+1)*interval),
 				func(typ RequestType, uuid string) {
 					require.Fail(t, "there sould be nothing to expire")
 				})
@@ -99,14 +84,14 @@ func TestDeadlineHeap(t *testing.T) {
 				})
 		}
 
-		now = deadline1
+		c.Set(deadline1)
 
 		h.Expire(func(typ RequestType, uuid string) {
 			expired[uuid] = struct{}{}
 		})
 		require.Len(t, expired, numDeadlines)
 
-		now = deadline2
+		c.Set(deadline2)
 		h.Expire(func(typ RequestType, uuid string) {
 			expired[uuid] = struct{}{}
 		})

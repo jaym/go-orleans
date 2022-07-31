@@ -99,7 +99,7 @@ func NewSilo(log logr.Logger, opts ...SiloOption) *Silo {
 		codec:             s.client.codec,
 		localGrainManager: s.localGrainManager,
 	}
-	s.transportManager = transport.NewManager(s.log.WithName("transport-manager"), handler)
+	s.transportManager = transport.NewManager(s.log.WithName("transport-manager"), s.clock, handler)
 	s.client.transportManager = s.transportManager
 	return s
 }

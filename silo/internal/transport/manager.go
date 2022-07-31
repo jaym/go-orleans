@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/benbjohnson/clock"
 	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
 	gogoproto "github.com/gogo/protobuf/proto"
@@ -18,15 +19,17 @@ import (
 
 type Manager struct {
 	lock       sync.RWMutex
+	clock      clock.Clock
 	log        logr.Logger
 	handler    TransportHandler
 	transports map[cluster.Location]*managedTransport
 	nodeNames  []string
 }
 
-func NewManager(log logr.Logger, handler TransportHandler) *Manager {
+func NewManager(log logr.Logger, c clock.Clock, handler TransportHandler) *Manager {
 	return &Manager{
 		log:        log,
+		clock:      c,
 		handler:    handler,
 		transports: make(map[cluster.Location]*managedTransport),
 		nodeNames:  []string{},
@@ -61,6 +64,7 @@ type UnsubscribeObserverFuture = future.Future[UnsubscribeObserverResponse]
 type managedTransportInternal struct {
 	TransportHandler
 	log                         logr.Logger
+	clock                       clock.Clock
 	transport                   cluster.Transport
 	lock                        sync.Mutex
 	stopped                     bool
@@ -73,7 +77,7 @@ type managedTransportInternal struct {
 
 func (h *managedTransportInternal) backgroundCleanupWorker(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(time.Second)
+		ticker := h.clock.Ticker(time.Second)
 		defer ticker.Stop()
 	LOOP:
 		for {
@@ -123,7 +127,6 @@ func (h *managedTransportInternal) stop() error {
 }
 
 func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string, deadline time.Time) RegisterObserverFuture {
-
 	f, p := future.NewFuture[RegisterObserverResponse](deadline)
 	h.lock.Lock()
 	defer h.lock.Unlock()
@@ -280,19 +283,27 @@ func (m *Manager) AddTransport(nodeName cluster.Location, creator func() (cluste
 	mt := &managedTransport{
 		internal: &managedTransportInternal{
 			log:                         m.log.WithName(string(nodeName)),
+			clock:                       m.clock,
 			transport:                   transport,
 			TransportHandler:            m.handler,
 			bgWorkerCancel:              bgWorkerCancel,
-			deadlineHeap:                NewDeadlineHeap(),
+			deadlineHeap:                NewDeadlineHeap(m.clock),
 			invokeMethodPromises:        make(map[string]InvokeMethodPromise),
 			registerObserverPromises:    make(map[string]RegisterObserverPromise),
 			unsubscribeObserverPromises: make(map[string]UnsubscribeObserverPromise),
 		},
 	}
 	mt.internal.backgroundCleanupWorker(bgWorkerCxt)
+
+	err = transport.Listen(mt.internal)
+	if err != nil {
+		return err
+	}
+
 	m.transports[nodeName] = mt
 	m.nodeNames = append(m.nodeNames, string(nodeName))
-	return transport.Listen(mt.internal)
+
+	return nil
 }
 
 func (m *Manager) RemoveTransport(nodeName cluster.Location) {
@@ -318,13 +329,23 @@ func (m *Manager) IsMember(nodeName cluster.Location) bool {
 	return ok
 }
 
+const maxRPCDuration = 60 * time.Second
+
+func (m *Manager) getDeadline(ctx context.Context) time.Time {
+	deadline, ok := ctx.Deadline()
+	if !ok || deadline.IsZero() {
+		return m.clock.Now().Add(maxRPCDuration)
+	}
+	return deadline
+}
+
 func (m *Manager) InvokeMethod(ctx context.Context, sender grain.Identity, receiver cluster.GrainAddress, method string, uuid string, payload []byte) (InvokeMethodFuture, error) {
 	t, err := m.getTransport(receiver.Location)
 	if err != nil {
 		return nil, err
 	}
 
-	deadline, _ := ctx.Deadline()
+	deadline := m.getDeadline(ctx)
 
 	f := t.internal.registerInvokeMethodPromise(uuid, deadline)
 	if err := t.internal.transport.EnqueueInvokeMethodRequest(ctx, sender, receiver.Identity, method, uuid, payload); err != nil {
@@ -340,7 +361,7 @@ func (m *Manager) RegisterObserver(ctx context.Context, observer grain.Identity,
 		return nil, err
 	}
 
-	deadline, _ := ctx.Deadline()
+	deadline := m.getDeadline(ctx)
 
 	f := t.internal.registerRegisterObserverPromise(uuid, deadline)
 	if err := t.internal.transport.EnqueueRegisterObserverRequest(ctx, observer, observable.Identity, name, uuid, payload, cluster.EnqueueRegisterObserverRequestOptions{
@@ -358,7 +379,7 @@ func (m *Manager) UnsubscribeObserver(ctx context.Context, observer grain.Identi
 		return nil, err
 	}
 
-	deadline, _ := ctx.Deadline()
+	deadline := m.getDeadline(ctx)
 
 	f := t.internal.registerUnsubscribeObserverPromise(uuid, deadline)
 	if err := t.internal.transport.EnqueueUnsubscribeObserverRequest(ctx, observer, observable.Identity, name, uuid); err != nil {
