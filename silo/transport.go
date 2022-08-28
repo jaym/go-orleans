@@ -14,21 +14,24 @@ import (
 type siloTransportHandler struct {
 	log               logr.Logger
 	codec             codec.Codec
+	codecV2           codec.CodecV2
 	localGrainManager *GrainActivationManagerImpl
 }
 
 func (s siloTransportHandler) ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, payload []byte, promise transport.InvokeMethodPromise) {
-	err := s.localGrainManager.EnqueueInvokeMethodRequest(InvokeMethodRequest{
-		Sender:   sender,
-		Receiver: receiver,
-		Method:   method,
-		in:       payload,
-		deadline: promise.Deadline(),
-		ResolveFunc: func(i interface{}, e error) {
+	dec, err := s.codecV2.Unpack(payload)
+	if err != nil {
+		promise.Reject(err)
+		s.log.Error(err, "failed to enqueue invoke method", "sender", sender, "receiver", receiver, "method", method)
+		return
+	}
+	ser := s.codecV2.Pack()
+	err = s.localGrainManager.EnqueueInvokeMethodRequest(sender, receiver, method, promise.Deadline(), dec, ser,
+		func(e error) {
 			if e != nil {
 				promise.Reject(e)
 			} else {
-				data, err := s.codec.Encode(i)
+				data, err := ser.ToBytes()
 				if err != nil {
 					promise.Reject(err)
 				} else {
@@ -37,8 +40,7 @@ func (s siloTransportHandler) ReceiveInvokeMethodRequest(ctx context.Context, se
 					})
 				}
 			}
-		},
-	})
+		})
 	if err != nil {
 		promise.Reject(err)
 		s.log.Error(err, "failed to enqueue invoke method", "sender", sender, "receiver", receiver, "method", method)
@@ -66,6 +68,17 @@ func (s siloTransportHandler) ReceiveRegisterObserverRequest(ctx context.Context
 	}
 }
 
+func (s siloTransportHandler) ReceiveInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity, receivers []grain.Identity, grainType string, methodName string, payload []byte) {
+	dec, err := s.codecV2.Unpack(payload)
+	if err != nil {
+		s.log.Error(err, "failed to enqueue one way method request", "sender", sender, "receivers", receivers, "name", methodName)
+		return
+	}
+	err = s.localGrainManager.EnqueueInvokeOneWayMethodRequest(sender, receivers, methodName, dec)
+	if err != nil {
+		s.log.Error(err, "failed to enqueue observer notification", "sender", sender, "receivers", receivers, "name", methodName)
+	}
+}
 func (s siloTransportHandler) ReceiveObserverNotification(ctx context.Context, sender grain.Identity, receivers []grain.Identity, observableType string, name string, payload []byte) {
 	err := s.localGrainManager.EnqueueObserverNotification(ObserverNotification{
 		Sender:         sender,
@@ -100,7 +113,6 @@ func (s siloTransportHandler) ReceiveUnsubscribeObserverRequest(ctx context.Cont
 
 type localTransport struct {
 	log               logr.Logger
-	codec             codec.Codec
 	localGrainManager *GrainActivationManagerImpl
 	h                 cluster.TransportHandler
 }
@@ -122,6 +134,11 @@ func deadline(ctx context.Context) time.Time {
 
 func (t *localTransport) EnqueueInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, uuid string, payload []byte) error {
 	t.h.ReceiveInvokeMethodRequest(ctx, sender, receiver, method, uuid, payload, deadline(ctx))
+	return nil
+}
+
+func (t *localTransport) EnqueueInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity, receivers []grain.Identity, grainType string, name string, payload []byte) error {
+	t.h.ReceiveInvokeOneWayMethodRequest(ctx, sender, receivers, grainType, name, payload)
 	return nil
 }
 

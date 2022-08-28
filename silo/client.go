@@ -18,6 +18,7 @@ import (
 type siloClientImpl struct {
 	log              logr.Logger
 	codec            codec.Codec
+	codecV2          codec.CodecV2
 	transportManager *transport.Manager
 	nodeName         cluster.Location
 	grainDirectory   cluster.GrainDirectory
@@ -173,4 +174,83 @@ func (s *siloClientImpl) NotifyObservers(ctx context.Context, observableType str
 		s.log.V(0).Error(err2, "failed to notify grains")
 	}
 	return errors.CombineErrors(err2, grainAddrErrs)
+}
+
+func (s *siloClientImpl) InvokeMethodV2(ctx context.Context, receiver grain.Identity, grainType string, method string,
+	ser func(grain.Serializer) error) grain.InvokeMethodFutureV2 {
+	id := ksuid.New().String()
+	log := s.log.WithValues("uuid", id, "receiver", receiver, "grainType", grainType, "method", method)
+
+	log.V(4).Info("InvokeMethod")
+
+	sender := gcontext.IdentityFromContext(ctx)
+	if sender == nil {
+		g := grain.Anonymous()
+		sender = &g
+	}
+
+	fser := s.codecV2.Pack()
+	if err := ser(fser); err != nil {
+		s.log.V(0).Error(err, "failed to serialize method arguments")
+		return invokeMethodFailedFutureV2{err: err}
+	}
+	bytes, err := fser.ToBytes()
+	if err != nil {
+		s.log.V(0).Error(err, "failed to serialize method arguments")
+		return invokeMethodFailedFutureV2{err: err}
+	}
+
+	addr, err := s.getGrainAddress(ctx, receiver)
+	if err != nil {
+		return invokeMethodFailedFutureV2{err: err}
+	}
+
+	f, err := s.transportManager.InvokeMethod(ctx, *sender, addr, method, id, bytes)
+	if err != nil {
+		return invokeMethodFailedFutureV2{err: err}
+	}
+
+	return newInvokeMethodFutureV2(s.codecV2, f)
+}
+
+func (s *siloClientImpl) InvokeOneWayMethod(ctx context.Context, receivers []grain.Identity, grainType string, method string,
+	ser func(grain.Serializer) error) {
+
+	if len(receivers) == 0 {
+		return
+	}
+
+	sender := gcontext.IdentityFromContext(ctx)
+	if sender == nil {
+		a := grain.Anonymous()
+		sender = &a
+	}
+
+	fser := s.codecV2.Pack()
+	if err := ser(fser); err != nil {
+		s.log.V(0).Error(err, "failed to serialize method arguments")
+		return
+	}
+	data, err := fser.ToBytes()
+	if err != nil {
+		s.log.V(0).Error(err, "failed to serialize method arguments")
+		return
+	}
+
+	receiverAddrs := make([]cluster.GrainAddress, 0, len(receivers))
+	var grainAddrErrs error
+	for _, r := range receivers {
+		addr, err := s.getGrainAddress(ctx, r)
+		if err != nil {
+			s.log.V(0).Error(err, "failed to find grain address", "grain", r)
+			grainAddrErrs = errors.CombineErrors(grainAddrErrs, err)
+			continue
+		}
+		receiverAddrs = append(receiverAddrs, addr)
+	}
+	err = s.transportManager.InvokeMethodOneWay(ctx, *sender, receiverAddrs, grainType, method, data)
+	if err != nil {
+		s.log.V(0).Error(err, "failed to invoke one way method")
+		return
+	}
 }

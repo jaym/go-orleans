@@ -38,6 +38,8 @@ func NewManager(log logr.Logger, c clock.Clock, handler TransportHandler) *Manag
 
 type TransportHandler interface {
 	ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, payload []byte, promise InvokeMethodPromise)
+	ReceiveInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity, receivers []grain.Identity, grainType string, name string, payload []byte)
+
 	ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, payload []byte, registrationTimeout time.Duration, promise RegisterObserverPromise)
 	ReceiveObserverNotification(ctx context.Context, sender grain.Identity, receivers []grain.Identity, observableType string, name string, payload []byte)
 	ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, promise UnsubscribeObserverPromise)
@@ -353,6 +355,25 @@ func (m *Manager) InvokeMethod(ctx context.Context, sender grain.Identity, recei
 		return nil, err
 	}
 	return f, nil
+}
+
+func (m *Manager) InvokeMethodOneWay(ctx context.Context, sender grain.Identity, receivers []cluster.GrainAddress, grainType string, name string, payload []byte) error {
+	locations := map[cluster.Location][]grain.Identity{}
+	for _, r := range receivers {
+		locations[r.Location] = append(locations[r.Location], r.Identity)
+	}
+	var combinedErrors error
+	for location, rs := range locations {
+		t, err := m.getTransport(location)
+		if err != nil {
+			combinedErrors = errors.CombineErrors(combinedErrors, err)
+			continue
+		}
+		if err := t.internal.transport.EnqueueObserverNotification(ctx, sender, rs, grainType, name, payload); err != nil {
+			combinedErrors = errors.CombineErrors(combinedErrors, err)
+		}
+	}
+	return combinedErrors
 }
 
 func (m *Manager) RegisterObserver(ctx context.Context, observer grain.Identity, observable cluster.GrainAddress, name string, uuid string, payload []byte, registrationTimeout time.Duration) (RegisterObserverFuture, error) {

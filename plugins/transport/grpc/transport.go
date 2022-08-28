@@ -344,6 +344,10 @@ func (t *transport) handleMsg(ctx context.Context, h cluster.TransportHandler, m
 	case *internal.TransportMessage_InvokeMethodReq:
 		req := m.InvokeMethodReq
 		h.ReceiveInvokeMethodRequest(ctx, grainIdent(req.Sender), grainIdent(req.Receiver), req.Method, req.Uuid, req.Payload, deadline)
+	case *internal.TransportMessage_InvokeOneWayMethodReq:
+		req := m.InvokeOneWayMethodReq
+		// TODO: write through deadline and uuid
+		h.ReceiveInvokeOneWayMethodRequest(ctx, grainIdent(req.Sender), grainIdents(req.Receivers), req.GrainType, req.MethodName, req.Payload)
 	case *internal.TransportMessage_InvokeMethodResp:
 		req := m.InvokeMethodResp
 		h.ReceiveInvokeMethodResponse(ctx, grainIdent(req.Receiver), req.Uuid, req.Payload, req.Err)
@@ -418,6 +422,22 @@ func (t *transport) EnqueueInvokeMethodRequest(ctx context.Context, sender grain
 				Method:   method,
 				Uuid:     uuid,
 				Payload:  payload,
+			},
+		},
+	}
+	return t.send(ctx, msg)
+}
+
+func (t *transport) EnqueueInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity,
+	receivers []grain.Identity, grainType string, methodName string, payload []byte) error {
+	msg := &internal.TransportMessage{
+		Msg: &internal.TransportMessage_InvokeOneWayMethodReq{
+			InvokeOneWayMethodReq: &internal.InvokeOneWayMethodReq{
+				Sender:     internalGrainIdent(sender),
+				Receivers:  internalGrainIdents(receivers),
+				GrainType:  grainType,
+				MethodName: methodName,
+				Payload:    payload,
 			},
 		},
 	}

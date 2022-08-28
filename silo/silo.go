@@ -12,6 +12,7 @@ import (
 	"github.com/jaym/go-orleans/grain"
 	"github.com/jaym/go-orleans/grain/descriptor"
 	"github.com/jaym/go-orleans/grain/generic"
+	"github.com/jaym/go-orleans/plugins/codec"
 	"github.com/jaym/go-orleans/plugins/codec/protobuf"
 	"github.com/jaym/go-orleans/silo/internal/transport"
 	"github.com/jaym/go-orleans/silo/services/cluster"
@@ -43,7 +44,8 @@ func NewSilo(log logr.Logger, opts ...SiloOption) *Silo {
 
 	s := &Silo{
 		Registrar: &registrarImpl{
-			entries: map[string]registrarEntry{},
+			entries:   map[string]registrarEntry{},
+			entriesV2: map[string]registrarEntryV2{},
 		},
 		log:                log.WithName("silo"),
 		nodeName:           options.NodeName(),
@@ -60,6 +62,7 @@ func NewSilo(log logr.Logger, opts ...SiloOption) *Silo {
 	s.client = &siloClientImpl{
 		log:            s.log.WithName("siloClient"),
 		codec:          protobuf.NewCodec(),
+		codecV2:        codec.NewBasicCodec(),
 		nodeName:       s.nodeName,
 		grainDirectory: s.grainDirectory,
 	}
@@ -97,6 +100,7 @@ func NewSilo(log logr.Logger, opts ...SiloOption) *Silo {
 	handler := siloTransportHandler{
 		log:               s.log.WithName("transport-handler"),
 		codec:             s.client.codec,
+		codecV2:           s.client.codecV2,
 		localGrainManager: s.localGrainManager,
 	}
 	s.transportManager = transport.NewManager(s.log.WithName("transport-manager"), s.clock, handler)
@@ -145,7 +149,6 @@ func (s *Silo) Start(ctx context.Context) error {
 	err = s.transportManager.AddTransport(s.nodeName, func() (cluster.Transport, error) {
 		return &localTransport{
 			log:               s.log.WithName("local-transport"),
-			codec:             s.client.codec,
 			localGrainManager: s.localGrainManager,
 		}, nil
 	})

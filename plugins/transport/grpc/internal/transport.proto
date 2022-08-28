@@ -23,6 +23,14 @@ message InvokeMethodReq {
   bytes payload = 5;
 }
 
+message InvokeOneWayMethodReq {
+  GrainIdentity sender = 1;
+  repeated GrainIdentity receivers = 2;
+  string grain_type = 3;
+  string method_name = 4;
+  bytes payload = 5;
+}
+
 message InvokeMethodResp {
   GrainIdentity receiver = 1;
   string uuid = 2;
@@ -82,6 +90,7 @@ message TransportMessage {
     AckRegisterObserver ack_register_observer = 6;
     UnsubscribeObserver unsubscribe_observer = 7;
     AckUnsubscribeObserver ack_unsubscribe_observer = 8;
+    InvokeOneWayMethodReq invoke_one_way_method_req = 9;
   }
 }
 

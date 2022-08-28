@@ -11,8 +11,16 @@ type InvokeMethodResp interface {
 	Get(out interface{}) error
 }
 
+type InvokeMethodRespV2 interface {
+	Get(func(Deserializer) error) error
+}
+
 type InvokeMethodFuture interface {
 	Await(ctx context.Context) (InvokeMethodResp, error)
+}
+
+type InvokeMethodFutureV2 interface {
+	Await(ctx context.Context) (InvokeMethodRespV2, error)
 }
 
 type RegisterObserverFuture interface {
@@ -44,4 +52,30 @@ type SiloClient interface {
 	RegisterObserver(ctx context.Context, observer Identity, observable Identity, name string, in proto.Message, opts ...RegisterObserverOption) RegisterObserverFuture
 	UnsubscribeObserver(ctx context.Context, observer Identity, observable Identity, name string) UnsubscribeObserverFuture
 	NotifyObservers(ctx context.Context, observableType string, observableName string, receiver []Identity, out proto.Message) error
+
+	InvokeOneWayMethod(ctx context.Context, toIdentity []Identity, grainType string, method string,
+		ser func(Serializer) error)
+	InvokeMethodV2(ctx context.Context, toIdentity Identity, grainType string, method string,
+		ser func(Serializer) error) InvokeMethodFutureV2
+}
+
+type Deserializer interface {
+	Int64() (int64, error)
+	Bool() (bool, error)
+	String() (string, error)
+	Bytes() ([]byte, error)
+	Interface(interface{}) error
+}
+
+type Serializer interface {
+	Int64(int64)
+	Bool(bool)
+	String(string)
+	Bytes([]byte)
+	Interface(interface{}) error
+}
+
+type Activation interface {
+	InvokeMethod(ctx context.Context, method string,
+		d Deserializer, respSerializer Serializer) error
 }

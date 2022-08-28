@@ -18,15 +18,6 @@ import (
 	"github.com/jaym/go-orleans/silo/services/timer"
 )
 
-type InvokeMethodRequest struct {
-	Sender      grain.Identity
-	Receiver    grain.Identity
-	Method      string
-	in          []byte
-	deadline    time.Time
-	ResolveFunc func(interface{}, error)
-}
-
 type RegisterObserverRequest struct {
 	Observer            grain.Identity
 	Observable          grain.Identity
@@ -135,13 +126,20 @@ func (m *GrainActivationManagerImpl) Start(ctx context.Context) error {
 	return nil
 }
 
-func (m *GrainActivationManagerImpl) EnqueueInvokeMethodRequest(req InvokeMethodRequest) error {
-	activation, err := m.getActivation(req.Receiver, true)
+func (m *GrainActivationManagerImpl) EnqueueInvokeMethodRequest(sender grain.Identity,
+	receiver grain.Identity, methodName string, deadline time.Time,
+	dec grain.Deserializer, ser grain.Serializer, resolve func(error)) error {
+	activation, err := m.getActivation(receiver, true)
 	if err != nil {
 		return err
 	}
 
-	return activation.InvokeMethod(req.Sender, req.Method, req.in, req.deadline, req.ResolveFunc)
+	return activation.InvokeMethod(sender, methodName, deadline, dec, ser, resolve)
+}
+
+func (m *GrainActivationManagerImpl) EnqueueInvokeOneWayMethodRequest(sender grain.Identity,
+	receivers []grain.Identity, methodName string, dec grain.Deserializer) error {
+	return nil
 }
 
 func (m *GrainActivationManagerImpl) EnqueueRegisterObserverRequest(req RegisterObserverRequest) error {

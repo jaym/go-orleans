@@ -8,7 +8,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
-	"google.golang.org/protobuf/proto"
 
 	gcontext "github.com/jaym/go-orleans/context"
 	"github.com/jaym/go-orleans/grain"
@@ -25,11 +24,13 @@ var defaultGrainInvocationTimeout time.Duration = 2 * time.Second
 type grainActivationMessageType int
 
 const (
-	invokeMethod grainActivationMessageType = iota + 1
+	invokeMethodV2 grainActivationMessageType = iota + 1
+	// invokeMethod grainActivationMessageType = iota + 1
 	registerObserver
 	unsubscribeObserver
 	notifyObserver
 	triggerTimer
+	invokeOneWayMethod
 )
 
 type grainActivationInvokeMethod struct {
@@ -38,6 +39,22 @@ type grainActivationInvokeMethod struct {
 	Payload     []byte
 	Deadline    time.Time
 	ResolveFunc func(out interface{}, err error)
+}
+
+type grainActivationInvokeMethodV2 struct {
+	Sender      grain.Identity
+	Method      string
+	Dec         grain.Deserializer
+	Ser         grain.Serializer
+	Deadline    time.Time
+	ResolveFunc func(err error)
+}
+
+type grainActivationInvokeOneWayMethod struct {
+	Sender   grain.Identity
+	Method   string
+	Dec      grain.Deserializer
+	Deadline time.Time
 }
 
 type grainActivationRegisterObserver struct {
@@ -69,12 +86,14 @@ type grainActivationNotifyObserver struct {
 }
 
 type grainActivationMessage struct {
-	messageType         grainActivationMessageType
-	invokeMethod        *grainActivationInvokeMethod
+	messageType grainActivationMessageType
+	// invokeMethod        *grainActivationInvokeMethod
 	registerObserver    *grainActivationRegisterObserver
 	unsubscribeObserver *grainActivationUnsubscribeObserver
 	notifyObserver      *grainActivationNotifyObserver
 	triggerTimer        *grainActivationTriggerTimer
+	invokeMethodV2      *grainActivationInvokeMethodV2
+	invokeOneWayMethod  *grainActivationInvokeOneWayMethod
 }
 
 type grainActivationEvict struct {
@@ -96,10 +115,10 @@ type LocalGrainActivation struct {
 	evictChan  chan grainActivationEvict
 	inbox      chan grainActivationMessage
 
-	log               logr.Logger
-	identity          grain.Identity
-	description       *descriptor.GrainDescription
-	activator         interface{}
+	log      logr.Logger
+	identity grain.Identity
+	// description       *descriptor.GrainDescription
+	activator         descriptor.ActivatorFunc
 	grainTimerService *grainTimerServiceImpl
 	grainActivator    *LocalGrainActivator
 }
@@ -130,25 +149,26 @@ func NewLocalGrainActivator(log logr.Logger, registrar descriptor.Registrar, sil
 }
 
 func (m *LocalGrainActivator) ActivateGrainWithDefaultActivator(identity grain.Identity) (*LocalGrainActivation, error) {
-	grainDesc, activator, err := m.registrar.Lookup(identity.GrainType)
+	activatorFunc, err := m.registrar.LookupV2(identity.GrainType)
 	if err != nil {
 		return nil, err
 	}
 
-	return m.activateGrain(identity, grainDesc, activator)
+	return m.activateGrain(identity, activatorFunc)
 }
 
 func (m *LocalGrainActivator) ActivateGenericGrain(g *generic.Grain) (*LocalGrainActivation, error) {
-	grainDesc := &generic.Descriptor
-	return m.activateGrain(g.Identity, grainDesc, g)
+	// grainDesc := &generic.Descriptor
+	// return m.activateGrain(g.Identity, grainDesc, g)
+	return nil, errors.New("unimplemented")
 }
 
-func (m *LocalGrainActivator) activateGrain(identity grain.Identity, grainDesc *descriptor.GrainDescription, activator interface{}) (*LocalGrainActivation, error) {
+func (m *LocalGrainActivator) activateGrain(identity grain.Identity, activatorFunc descriptor.ActivatorFunc) (*LocalGrainActivation, error) {
 	l := &LocalGrainActivation{
-		log:            m.log.WithName("grain").WithValues("type", identity.GrainType, "id", identity.ID),
-		identity:       identity,
-		description:    grainDesc,
-		activator:      activator,
+		log:      m.log.WithName("grain").WithValues("type", identity.GrainType, "id", identity.ID),
+		identity: identity,
+		// description:    grainDesc,
+		activator:      activatorFunc,
 		inbox:          make(chan grainActivationMessage, m.defaultMailboxSize),
 		evictChan:      make(chan grainActivationEvict, 1),
 		grainActivator: m,
@@ -157,33 +177,33 @@ func (m *LocalGrainActivator) activateGrain(identity grain.Identity, grainDesc *
 	return l, nil
 }
 
-func (g *LocalGrainActivation) findMethodDesc(name string) (*descriptor.MethodDesc, error) {
-	for i := range g.description.Methods {
-		if g.description.Methods[i].Name == name {
-			return &g.description.Methods[i], nil
-		}
-	}
-	return nil, ErrGrainMethodNotFound
-}
+// func (g *LocalGrainActivation) findMethodDesc(name string) (*descriptor.MethodDesc, error) {
+// 	for i := range g.description.Methods {
+// 		if g.description.Methods[i].Name == name {
+// 			return &g.description.Methods[i], nil
+// 		}
+// 	}
+// 	return nil, ErrGrainMethodNotFound
+// }
 
-func (g *LocalGrainActivation) findObserableDesc(grainType, name string) (*descriptor.ObservableDesc, error) {
-	var desc *descriptor.GrainDescription
-	if grainType == "" {
-		desc = g.description
-	} else {
-		var err error
-		desc, _, err = g.grainActivator.registrar.Lookup(grainType)
-		if err != nil {
-			return nil, err
-		}
-	}
-	for i := range desc.Observables {
-		if desc.Observables[i].Name == name {
-			return &desc.Observables[i], nil
-		}
-	}
-	return nil, ErrGrainObservableNotFound
-}
+// func (g *LocalGrainActivation) findObserableDesc(grainType, name string) (*descriptor.ObservableDesc, error) {
+// 	var desc *descriptor.GrainDescription
+// 	if grainType == "" {
+// 		desc = g.description
+// 	} else {
+// 		var err error
+// 		desc, _, err = g.grainActivator.registrar.Lookup(grainType)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 	}
+// 	for i := range desc.Observables {
+// 		if desc.Observables[i].Name == name {
+// 			return &desc.Observables[i], nil
+// 		}
+// 	}
+// 	return nil, ErrGrainObservableNotFound
+// }
 
 func (l *LocalGrainActivation) start() {
 	ctx := gcontext.WithIdentityContext(context.Background(), l.identity)
@@ -215,7 +235,8 @@ func (l *LocalGrainActivation) loop(ctx context.Context) {
 		return
 	}
 
-	activation, err := l.description.Activation.Handler(l.activator, ctx, coreServices, l.identity)
+	// activation, err := l.description.Activation.Handler(l.activator, ctx, coreServices, l.identity)
+	activation, err := l.activator(ctx, l.identity, coreServices)
 	if err != nil {
 		l.setStateDeactivating()
 		l.shutdown(ctx, err)
@@ -256,7 +277,7 @@ func (l *LocalGrainActivation) setStateDeactivated() {
 	l.lock.Unlock()
 }
 
-func (l *LocalGrainActivation) evict(ctx context.Context, activation grain.GrainReference, mustStop bool, onComplete func(error)) bool {
+func (l *LocalGrainActivation) evict(ctx context.Context, activation grain.Activation, mustStop bool, onComplete func(error)) bool {
 	ctx, cancel := context.WithTimeout(ctx, defaultDeactivateTimeout)
 	defer cancel()
 
@@ -277,106 +298,36 @@ func (l *LocalGrainActivation) evict(ctx context.Context, activation grain.Grain
 	return false
 }
 
-func (l *LocalGrainActivation) processMessage(ctx context.Context, activation grain.GrainReference, msg grainActivationMessage) {
+func (l *LocalGrainActivation) processMessage(ctx context.Context, activation grain.Activation, msg grainActivationMessage) {
 	switch msg.messageType {
-	case invokeMethod:
+	case invokeMethodV2:
 		l.grainActivator.resourceManager.Touch(l.identity)
-		req := msg.invokeMethod
-		m, err := l.findMethodDesc(req.Method)
-		if err != nil {
-			req.ResolveFunc(nil, err)
-			return
-		}
+		req := msg.invokeMethodV2
 
 		var cancel context.CancelFunc
-		if deadline := msg.invokeMethod.Deadline; !deadline.IsZero() {
+		if deadline := req.Deadline; !deadline.IsZero() {
 			ctx, cancel = context.WithDeadline(ctx, deadline)
-		} else if m.DefaultTimeout != 0 {
-			ctx, cancel = context.WithTimeout(ctx, m.DefaultTimeout)
 		} else {
 			ctx, cancel = context.WithTimeout(ctx, defaultGrainInvocationTimeout)
 		}
 		defer cancel()
 
-		resp, err := m.Handler(activation, ctx, func(in interface{}) error {
-			return proto.Unmarshal(req.Payload, in.(proto.Message))
-		})
-		req.ResolveFunc(resp, err)
-	case registerObserver:
-		l.grainActivator.resourceManager.Touch(l.identity)
+		err := activation.InvokeMethod(ctx, req.Method, req.Dec, req.Ser)
 
-		req := msg.registerObserver
-		o, err := l.findObserableDesc("", req.Name)
-		if err != nil {
-			req.ResolveFunc(err)
-			return
-		}
-
-		var cancel context.CancelFunc
-		if deadline := msg.registerObserver.Deadline; !deadline.IsZero() {
-			ctx, cancel = context.WithDeadline(ctx, deadline)
-		} else if o.DefaultTimeout != 0 {
-			ctx, cancel = context.WithTimeout(ctx, o.DefaultTimeout)
-		} else {
-			ctx, cancel = context.WithTimeout(ctx, defaultGrainInvocationTimeout)
-		}
-		defer cancel()
-
-		err = o.RegisterHandler(activation, ctx, req.Observer, req.RegistrationTimeout, func(in interface{}) error {
-			return proto.Unmarshal(req.Payload, in.(proto.Message))
-		})
 		req.ResolveFunc(err)
-	case unsubscribeObserver:
-		req := msg.unsubscribeObserver
-		o, err := l.findObserableDesc("", req.Name)
-		if err != nil {
-			req.ResolveFunc(err)
-			return
-		}
+	case invokeOneWayMethod:
+		req := msg.invokeOneWayMethod
 
 		var cancel context.CancelFunc
-		if deadline := msg.unsubscribeObserver.Deadline; !deadline.IsZero() {
+		if deadline := req.Deadline; !deadline.IsZero() {
 			ctx, cancel = context.WithDeadline(ctx, deadline)
-		} else if o.DefaultTimeout != 0 {
-			ctx, cancel = context.WithTimeout(ctx, o.DefaultTimeout)
 		} else {
 			ctx, cancel = context.WithTimeout(ctx, defaultGrainInvocationTimeout)
 		}
 		defer cancel()
 
-		err = o.UnsubscribeHandler(activation, ctx, req.Observer)
-		req.ResolveFunc(err)
-	case notifyObserver:
-		l.grainActivator.resourceManager.Touch(l.identity)
-
-		req := msg.notifyObserver
-		o, err := l.findObserableDesc(req.ObservableType, req.Name)
-		if err != nil {
-			l.log.Error(err, "failed to find observable")
-			return
-		}
-
-		decoder := func(in interface{}) error {
-			return proto.Unmarshal(req.Payload, in.(proto.Message))
-		}
-
-		ctx, cancel := context.WithTimeout(ctx, defaultGrainInvocationTimeout)
-		defer cancel()
-
-		if genericGrain, ok := activation.(*generic.Grain); ok {
-			err = genericGrain.HandleNotification(req.ObservableType, req.Name, req.Sender, decoder)
-			if err != nil {
-				l.log.Error(err, "failed to handle generic grain notification")
-				return
-			}
-		} else {
-			err = o.Handler(activation, ctx, decoder)
-			if err != nil {
-				l.log.Error(err, "failed to handle notify observer")
-				return
-			}
-		}
-
+		err := activation.InvokeMethod(ctx, req.Method, req.Dec, nil)
+		l.log.Error(err, "failed to invoke one way method", "identity", l.identity, "method", req.Method)
 	case triggerTimer:
 		req := msg.triggerTimer
 		ctx, cancel := context.WithTimeout(ctx, defaultGrainTimerTriggerTimeout)
@@ -388,17 +339,9 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 func (l *LocalGrainActivation) shutdown(ctx context.Context, err error) {
 	for msg := range l.inbox {
 		switch msg.messageType {
-		case invokeMethod:
-			req := msg.invokeMethod
-			req.ResolveFunc(nil, err)
-		case registerObserver:
-			req := msg.registerObserver
+		case invokeMethodV2:
+			req := msg.invokeMethodV2
 			req.ResolveFunc(err)
-		case unsubscribeObserver:
-			req := msg.unsubscribeObserver
-			req.ResolveFunc(err)
-		case notifyObserver:
-		case triggerTimer:
 		}
 	}
 
@@ -411,15 +354,29 @@ func (l *LocalGrainActivation) shutdown(ctx context.Context, err error) {
 	l.setStateDeactivated()
 }
 
-func (l *LocalGrainActivation) InvokeMethod(sender grain.Identity, method string, payload []byte, deadline time.Time, resolve func(out interface{}, err error)) error {
+func (l *LocalGrainActivation) InvokeMethod(sender grain.Identity, method string, deadline time.Time, dec grain.Deserializer, ser grain.Serializer,
+	resolve func(err error)) error {
 	return l.pushInbox(grainActivationMessage{
-		messageType: invokeMethod,
-		invokeMethod: &grainActivationInvokeMethod{
+		messageType: invokeMethodV2,
+		invokeMethodV2: &grainActivationInvokeMethodV2{
 			Sender:      sender,
 			Method:      method,
-			Payload:     payload,
 			Deadline:    deadline,
 			ResolveFunc: resolve,
+			Dec:         dec,
+			Ser:         ser,
+		},
+	})
+}
+
+func (l *LocalGrainActivation) InvokeOneWayMethod(sender grain.Identity, method string, deadline time.Time, dec grain.Deserializer) error {
+	return l.pushInbox(grainActivationMessage{
+		messageType: invokeOneWayMethod,
+		invokeOneWayMethod: &grainActivationInvokeOneWayMethod{
+			Sender:   sender,
+			Method:   method,
+			Dec:      dec,
+			Deadline: deadline,
 		},
 	})
 }
