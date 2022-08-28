@@ -9,10 +9,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/segmentio/ksuid"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/jaym/go-orleans/grain"
-	"github.com/jaym/go-orleans/grain/descriptor"
 	"github.com/jaym/go-orleans/grain/services"
 )
 
@@ -22,6 +20,7 @@ var (
 	ErrStreamInboxFull             = errors.New("stream inbox full")
 	ErrObservableAlreadyRegistered = errors.New("observable already registered")
 	ErrNoHandler                   = errors.New("no handler for notification")
+	ErrInvalidID                   = errors.New("generic grain has invalid id")
 )
 
 const (
@@ -29,42 +28,100 @@ const (
 
 	registrationRefreshInterval = time.Minute
 	registrationTimeout         = 3 * registrationRefreshInterval
+
+	refreshObservablesTickerName = "__refresh-observables"
 )
 
-var Descriptor = descriptor.GrainDescription{
-	GrainType: GenericGrainType,
-	Activation: descriptor.ActivationDesc{
-		Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
-			g := activator.(*Grain)
-			err := coreServices.TimerService().RegisterTicker("obsv", registrationRefreshInterval, func(ctx context.Context) {
-				g.refreshObservables(ctx)
-			})
-			if err != nil {
-				return nil, err
-			}
-			return g, nil
-		},
-	},
+type ObservableGrain interface {
+	grain.GrainReference
+	UnregisterObserver(context.Context, grain.ObserverRegistrationToken)
+	RefreshObserver(context.Context, grain.ObserverRegistrationToken) (grain.ObserverRegistrationToken, error)
 }
 
 type observable struct {
-	ident grain.Identity
-	req   proto.Message
+	id    string
+	ref   ObservableGrain
+	token grain.ObserverRegistrationToken
 }
+
+type InvokeMethodFunc func(ctx context.Context, client grain.SiloClient, method string, sender grain.Identity,
+	d grain.Deserializer, respSerializer grain.Serializer) error
 
 type Grain struct {
 	grain.Identity
 
-	client  grain.SiloClient
-	lock    sync.RWMutex
-	streams map[string]*stream
+	client grain.SiloClient
+	lock   sync.RWMutex
+
+	methods     map[string]InvokeMethodFunc
+	observables map[string]observable
 }
 
 func NewGrain(location string, client grain.SiloClient) *Grain {
 	return &Grain{
-		Identity: Identity(location),
-		client:   client,
-		streams:  map[string]*stream{},
+		Identity:    Identity(location),
+		client:      client,
+		methods:     map[string]InvokeMethodFunc{},
+		observables: map[string]observable{},
+	}
+}
+
+func (s *Grain) Activate(ctx context.Context, identity grain.Identity, services services.CoreGrainServices) (grain.Activation, error) {
+	err := services.TimerService().RegisterTicker(refreshObservablesTickerName, 10*time.Second, func(ctx context.Context) {
+		s.lock.Lock()
+		defer s.lock.Unlock()
+		fmt.Println("Refreshing observables")
+		for k, o := range s.observables {
+			t, err := o.ref.RefreshObserver(ctx, o.token)
+			if err != nil {
+				fmt.Printf("an error happened in refreshing observables: %v\n", err)
+				continue
+			}
+			s.observables[k] = observable{
+				id:    k,
+				ref:   o.ref,
+				token: t,
+			}
+		}
+
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Grain) InvokeMethod(ctx context.Context, methodName string, sender grain.Identity,
+	d grain.Deserializer, respSerializer grain.Serializer) error {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
+	if m, ok := s.methods[methodName]; ok {
+		return m(ctx, s.client, methodName, sender, d, respSerializer)
+	}
+
+	return errors.New("unknown method")
+}
+
+func (s *Grain) OnMethod(methodName string, f InvokeMethodFunc) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if _, ok := s.methods[methodName]; ok {
+		return errors.New("method already registered")
+	}
+	s.methods[methodName] = f
+
+	return nil
+}
+
+func (s *Grain) RegisterObservable(ref ObservableGrain, token grain.ObserverRegistrationToken) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	id := ksuid.New().String()
+	s.observables[id] = observable{
+		id:    id,
+		ref:   ref,
+		token: token,
 	}
 }
 
@@ -74,12 +131,6 @@ func Identity(location string) grain.Identity {
 		ID:        fmt.Sprintf("%s!%s", location, ksuid.New().String()),
 	}
 }
-
-func IsGenericGrain(ident grain.Identity) bool {
-	return ident.GrainType == GenericGrainType
-}
-
-var ErrInvalidID = errors.New("generic grain has invalid id")
 
 func ParseIdentity(ident grain.Identity) (location string, err error) {
 	if !IsGenericGrain(ident) {
@@ -92,215 +143,6 @@ func ParseIdentity(ident grain.Identity) (location string, err error) {
 	return parts[0], nil
 }
 
-type Message struct {
-	Sender  grain.Identity
-	decoder decoderFunc
-}
-
-func (m *Message) Decode(in interface{}) error {
-	return m.decoder(in)
-}
-
-type Stream interface {
-	Done() <-chan struct{}
-	Close(ctx context.Context) error
-	C() <-chan Message
-	GenericObserve(context.Context, grain.Identity, proto.Message) error
-}
-
-func (g *Grain) CreateStream(observableType string, observableName string) (Stream, error) {
-	g.lock.Lock()
-	defer g.lock.Unlock()
-
-	k := key(observableType, observableName)
-	if _, ok := g.streams[k]; ok {
-		return nil, ErrObservableAlreadyRegistered
-	}
-	s := &stream{
-		g:              g,
-		c:              make(chan Message, 8),
-		done:           make(chan struct{}),
-		observableType: observableType,
-		observableName: observableName,
-	}
-	g.streams[k] = s
-	return s, nil
-}
-
-func (g *Grain) HandleNotification(observableType string, observableName string, sender grain.Identity, decoder decoderFunc) error {
-	g.lock.RLock()
-	defer g.lock.RUnlock()
-
-	k := key(observableType, observableName)
-	s, ok := g.streams[k]
-	if !ok {
-		return ErrNoHandler
-	}
-	select {
-	case s.c <- Message{
-		Sender:  sender,
-		decoder: decoder,
-	}:
-	default:
-		return ErrStreamInboxFull
-	}
-	return nil
-}
-
-func (g *Grain) Deactivate(ctx context.Context) {
-	g.lock.Lock()
-	defer g.lock.Unlock()
-
-	// TODO: asser that this method is only called by the runtime
-	// users should use silo.DestroyGrain
-
-	for _, s := range g.streams {
-		close(s.done)
-		// TODO: what should happen with this error
-		s.destroy(ctx)
-	}
-
-	g.streams = map[string]*stream{}
-}
-
-func (g *Grain) deleteStream(k string) {
-	g.lock.Lock()
-	defer g.lock.Unlock()
-
-	if s, ok := g.streams[k]; ok {
-		close(s.done)
-		delete(g.streams, k)
-	}
-}
-
-func (g *Grain) refreshObservables(ctx context.Context) {
-	g.lock.RLock()
-	defer g.lock.RUnlock()
-
-	for _, s := range g.streams {
-		s.refreshObservables(ctx)
-	}
-}
-
-func key(observableType string, observableName string) string {
-	return fmt.Sprintf("%s\x00%s", observableType, observableName)
-}
-
-type stream struct {
-	l              sync.Mutex
-	destroyed      bool
-	g              *Grain
-	c              chan Message
-	done           chan struct{}
-	observableType string
-	observableName string
-	observables    []observable
-}
-
-func (s *stream) Done() <-chan struct{} {
-	return s.done
-}
-
-func (s *stream) Close(ctx context.Context) error {
-	// TODO: the lock should probably be held for this entire operation
-	s.g.deleteStream(key(s.observableType, s.observableName))
-
-	return s.destroy(ctx)
-}
-
-func (s *stream) destroy(ctx context.Context) error {
-	s.l.Lock()
-	defer s.l.Unlock()
-	if s.destroyed {
-		return nil
-	}
-	s.destroyed = true
-
-	futures := make([]grain.UnsubscribeObserverFuture, len(s.observables))
-	for i, o := range s.observables {
-		f := s.g.client.UnsubscribeObserver(ctx, s.g.Identity, o.ident, s.observableName)
-		futures[i] = f
-	}
-
-	for _, f := range futures {
-		if err := f.Await(ctx); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (s *stream) C() <-chan Message {
-	return s.c
-}
-
-func (s *stream) GenericObserve(ctx context.Context, observableIdent grain.Identity, req proto.Message) error {
-	s.l.Lock()
-	defer s.l.Unlock()
-
-	f := s.g.client.RegisterObserver(ctx, s.g.Identity, observableIdent, s.observableName, req, grain.WithRegisterObserverRegistrationTimeout(registrationTimeout))
-	if err := f.Await(ctx); err != nil {
-		return err
-	}
-
-	observableIdx := s.findObservable(observableIdent)
-	if observableIdx != -1 {
-		s.observables[observableIdx].req = req
-	} else {
-		s.observables = append(s.observables, observable{
-			ident: observableIdent,
-			req:   req,
-		})
-	}
-
-	return nil
-}
-
-func (s *stream) Unsubscribe(ctx context.Context, observableIdent grain.Identity) error {
-	s.l.Lock()
-	defer s.l.Unlock()
-
-	observableIdx := s.findObservable(observableIdent)
-	if observableIdx != -1 {
-		return nil
-	}
-
-	f := s.g.client.UnsubscribeObserver(ctx, s.g.Identity, observableIdent, s.observableName)
-	if err := f.Await(ctx); err != nil {
-		return err
-	}
-
-	newLen := len(s.observables) - 1
-	if newLen > 0 {
-		s.observables[observableIdx] = s.observables[newLen]
-		s.observables = s.observables[:newLen]
-	}
-
-	return nil
-}
-
-func (s *stream) refreshObservables(ctx context.Context) {
-	s.l.Lock()
-	defer s.l.Unlock()
-
-	futures := make([]grain.RegisterObserverFuture, len(s.observables))
-	for i, o := range s.observables {
-		futures[i] = s.g.client.RegisterObserver(ctx, s.g.Identity, o.ident, s.observableName, o.req, grain.WithRegisterObserverRegistrationTimeout(registrationTimeout))
-	}
-	for _, f := range futures {
-		err := f.Await(ctx)
-		if err != nil {
-			// TODO: what should happen with the errors
-		}
-	}
-}
-
-func (s *stream) findObservable(o grain.Identity) int {
-	for i, eo := range s.observables {
-		if eo.ident == o {
-			return i
-		}
-	}
-	return -1
+func IsGenericGrain(ident grain.Identity) bool {
+	return ident.GrainType == GenericGrainType
 }

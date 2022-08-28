@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package goor.codec.frame;
+
+option go_package = "github.com/jaym/go-orleans/plugins/codec/frame";
+
+message Frame { repeated Value values = 1; }
+
+message Value {
+  enum ValueType {
+    NULL = 0;
+    STRING = 1;
+    BYTES = 2;
+    PROTOBUF = 3;
+    JSON = 4;
+    BOOL = 5;
+    INT64 = 6;
+    UINT64 = 7;
+    FLOAT64 = 8;
+
+    STRING_LIST = 9;
+    BYTES_LIST = 10;
+    BOOL_LIST = 11;
+    INT64_LIST = 12;
+    UINT64_LIST = 13;
+  }
+  ValueType value_type = 1;
+  string string_value = 2;
+  // bytes_value is either bytes, json, or protobuf
+  bytes bytes_value = 3;
+  bool bool_value = 4;
+  int64 int_value = 5;
+  uint64 uint_value = 6;
+  double float_value = 7;
+  repeated string string_list_value = 8;
+  repeated bytes bytes_list_value = 9;
+  repeated bool bool_list_value = 10;
+  repeated int64 int64_list_value = 11;
+  repeated uint64 uint64_list_value = 12;
+}

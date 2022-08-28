@@ -12,41 +12,32 @@ type Registrar struct {
 	mock.Mock
 }
 
-// Lookup provides a mock function with given fields: grainType
-func (_m *Registrar) Lookup(grainType string) (*descriptor.GrainDescription, interface{}, error) {
+// LookupV2 provides a mock function with given fields: grainType
+func (_m *Registrar) LookupV2(grainType string) (descriptor.ActivatorFunc, error) {
 	ret := _m.Called(grainType)
 
-	var r0 *descriptor.GrainDescription
-	if rf, ok := ret.Get(0).(func(string) *descriptor.GrainDescription); ok {
+	var r0 descriptor.ActivatorFunc
+	if rf, ok := ret.Get(0).(func(string) descriptor.ActivatorFunc); ok {
 		r0 = rf(grainType)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*descriptor.GrainDescription)
+			r0 = ret.Get(0).(descriptor.ActivatorFunc)
 		}
 	}
 
-	var r1 interface{}
-	if rf, ok := ret.Get(1).(func(string) interface{}); ok {
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
 		r1 = rf(grainType)
 	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(interface{})
-		}
+		r1 = ret.Error(1)
 	}
 
-	var r2 error
-	if rf, ok := ret.Get(2).(func(string) error); ok {
-		r2 = rf(grainType)
-	} else {
-		r2 = ret.Error(2)
-	}
-
-	return r0, r1, r2
+	return r0, r1
 }
 
-// Register provides a mock function with given fields: desc, impl
-func (_m *Registrar) Register(desc *descriptor.GrainDescription, impl interface{}) {
-	_m.Called(desc, impl)
+// RegisterV2 provides a mock function with given fields: grainType, activatorFunc
+func (_m *Registrar) RegisterV2(grainType string, activatorFunc descriptor.ActivatorFunc) {
+	_m.Called(grainType, activatorFunc)
 }
 
 type mockConstructorTestingTNewRegistrar interface {

@@ -12,12 +12,11 @@ import (
 	"github.com/jaym/go-orleans/silo/internal/transport"
 	"github.com/jaym/go-orleans/silo/services/cluster"
 	"github.com/segmentio/ksuid"
-	"google.golang.org/protobuf/proto"
 )
 
 type siloClientImpl struct {
 	log              logr.Logger
-	codec            codec.Codec
+	codecV2          codec.CodecV2
 	transportManager *transport.Manager
 	nodeName         cluster.Location
 	grainDirectory   cluster.GrainDirectory
@@ -52,10 +51,10 @@ func (s *siloClientImpl) placeGrain(ctx context.Context, ident grain.Identity) (
 	}, nil
 }
 
-func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver grain.Identity, grainType string, method string,
-	in proto.Message) grain.InvokeMethodFuture {
+func (s *siloClientImpl) InvokeMethodV2(ctx context.Context, receiver grain.Identity, method string,
+	ser func(grain.Serializer) error) grain.InvokeMethodFutureV2 {
 	id := ksuid.New().String()
-	log := s.log.WithValues("uuid", id, "receiver", receiver, "grainType", grainType, "method", method)
+	log := s.log.WithValues("uuid", id, "receiver", receiver, "method", method)
 
 	log.V(4).Info("InvokeMethod")
 
@@ -64,96 +63,53 @@ func (s *siloClientImpl) InvokeMethod(ctx context.Context, receiver grain.Identi
 		g := grain.Anonymous()
 		sender = &g
 	}
-	bytes, err := proto.Marshal(in)
+
+	fser := s.codecV2.Pack()
+	if err := ser(fser); err != nil {
+		s.log.V(0).Error(err, "failed to serialize method arguments")
+		return invokeMethodFailedFutureV2{err: err}
+	}
+	bytes, err := fser.ToBytes()
 	if err != nil {
-		return invokeMethodFailedFuture{err: err}
+		s.log.V(0).Error(err, "failed to serialize method arguments")
+		return invokeMethodFailedFutureV2{err: err}
 	}
 
 	addr, err := s.getGrainAddress(ctx, receiver)
 	if err != nil {
-		return invokeMethodFailedFuture{err: err}
+		return invokeMethodFailedFutureV2{err: err}
 	}
 
 	f, err := s.transportManager.InvokeMethod(ctx, *sender, addr, method, id, bytes)
 	if err != nil {
-		return invokeMethodFailedFuture{err: err}
+		return invokeMethodFailedFutureV2{err: err}
 	}
 
-	return newInvokeMethodFuture(s.codec, f)
+	return newInvokeMethodFutureV2(s.codecV2, f)
 }
 
-func (s *siloClientImpl) RegisterObserver(ctx context.Context, observer grain.Identity, observable grain.Identity,
-	name string, in proto.Message, opts ...grain.RegisterObserverOption) grain.RegisterObserverFuture {
-
-	options := grain.RegisterObserverOptions{}
-	for _, o := range opts {
-		o(&options)
-	}
-
-	id := ksuid.New().String()
-
-	log := s.log.WithValues("uuid", id, "observer", observer, "observable", observable, "observableName", name)
-	log.V(4).Info("RegisterObserver")
-
-	data, err := proto.Marshal(in)
-	if err != nil {
-		return registerObserverFailedFuture{err: err}
-	}
-
-	addr, err := s.getGrainAddress(ctx, observable)
-	if err != nil {
-		return registerObserverFailedFuture{err: err}
-	}
-
-	f, err := s.transportManager.RegisterObserver(ctx, observer, addr, name, id, data, options.RegistrationTimeout)
-	if err != nil {
-		return registerObserverFailedFuture{err: err}
-	}
-
-	return newUnitFuture(s.codec, f)
-}
-
-func (s *siloClientImpl) UnsubscribeObserver(ctx context.Context, observer grain.Identity, observable grain.Identity,
-	name string) grain.UnsubscribeObserverFuture {
-
-	id := ksuid.New().String()
-
-	log := s.log.WithValues("uuid", id, "observer", observer, "observable", observable, "observableName", name)
-	log.V(4).Info("RegisterObserver")
-
-	addr, err := s.getGrainAddress(ctx, observable)
-	if err != nil {
-		return registerObserverFailedFuture{err: err}
-	}
-
-	f, err := s.transportManager.UnsubscribeObserver(ctx, observer, addr, name, id)
-	if err != nil {
-		return registerObserverFailedFuture{err: err}
-	}
-
-	return newUnitFuture(s.codec, f)
-}
-
-func (s *siloClientImpl) NotifyObservers(ctx context.Context, observableType string, observableName string,
-	receivers []grain.Identity, out proto.Message) error {
-
-	log := s.log.WithValues("recievers", receivers)
-	log.V(4).Info("NotifyObservers")
+func (s *siloClientImpl) InvokeOneWayMethod(ctx context.Context, receivers []grain.Identity, method string,
+	ser func(grain.Serializer) error) {
 
 	if len(receivers) == 0 {
-		return nil
+		return
 	}
 
 	sender := gcontext.IdentityFromContext(ctx)
 	if sender == nil {
-		log.Info("no sender in context")
-		panic("no sender")
+		a := grain.Anonymous()
+		sender = &a
 	}
 
-	data, err := proto.Marshal(out)
+	fser := s.codecV2.Pack()
+	if err := ser(fser); err != nil {
+		s.log.V(0).Error(err, "failed to serialize method arguments")
+		return
+	}
+	data, err := fser.ToBytes()
 	if err != nil {
-		log.Error(err, "failed to marshal")
-		return err
+		s.log.V(0).Error(err, "failed to serialize method arguments")
+		return
 	}
 
 	receiverAddrs := make([]cluster.GrainAddress, 0, len(receivers))
@@ -167,10 +123,9 @@ func (s *siloClientImpl) NotifyObservers(ctx context.Context, observableType str
 		}
 		receiverAddrs = append(receiverAddrs, addr)
 	}
-
-	err2 := s.transportManager.ObserverNotificationAsync(ctx, *sender, receiverAddrs, observableType, observableName, data)
-	if err2 != nil {
-		s.log.V(0).Error(err2, "failed to notify grains")
+	err = s.transportManager.InvokeMethodOneWay(ctx, *sender, receiverAddrs, method, data)
+	if err != nil {
+		s.log.V(0).Error(err, "failed to invoke one way method")
+		return
 	}
-	return errors.CombineErrors(err2, grainAddrErrs)
 }

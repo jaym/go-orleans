@@ -18,23 +18,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type mockRegistrarEntry struct {
-	desc *descriptor.GrainDescription
-	impl interface{}
-}
 type mockRegistrar struct {
-	entries map[string]mockRegistrarEntry
+	entries map[string]descriptor.ActivatorFunc
 }
 
-func (*mockRegistrar) Register(desc *descriptor.GrainDescription, impl interface{}) {
+func (*mockRegistrar) RegisterV2(grainType string, activatorFunc descriptor.ActivatorFunc) {
 	panic("unimplemented")
 }
-func (m *mockRegistrar) Lookup(grainType string) (*descriptor.GrainDescription, interface{}, error) {
+func (m *mockRegistrar) LookupV2(grainType string) (descriptor.ActivatorFunc, error) {
 	e, ok := m.entries[grainType]
 	if !ok {
-		return nil, nil, descriptor.ErrGrainTypeNotFound
+		return nil, descriptor.ErrGrainTypeNotFound
 	}
-	return e.desc, e.impl, nil
+	return e, nil
 }
 
 type noopResourceManager struct{}
@@ -43,7 +39,7 @@ func (noopResourceManager) Touch(grainAddr grain.Identity) error  { return nil }
 func (noopResourceManager) Remove(grainAddr grain.Identity) error { return nil }
 
 func TestActivationFailsOfUnknownGrainType(t *testing.T) {
-	registrar := &mockRegistrar{entries: map[string]mockRegistrarEntry{}}
+	registrar := &mockRegistrar{entries: map[string]descriptor.ActivatorFunc{}}
 	timerService := mocks.NewTimerService(t)
 	siloClient := mocks.NewSiloClient(t)
 	resourceManager := mocks.NewResourceManager(t)
@@ -58,21 +54,13 @@ func TestActivationFailsOfUnknownGrainType(t *testing.T) {
 
 func TestActivationGrainActivationNoResources(t *testing.T) {
 	registrar := &mockRegistrar{
-		entries: map[string]mockRegistrarEntry{
-			"Mytype": {
-				desc: &descriptor.GrainDescription{
+		entries: map[string]descriptor.ActivatorFunc{
+			"Mytype": func(ctx context.Context, identity grain.Identity, services services.CoreGrainServices) (grain.Activation, error) {
+				assert.Equal(t, grain.Identity{
 					GrainType: "Mytype",
-					Activation: descriptor.ActivationDesc{
-						Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
-							assert.Equal(t, grain.Identity{
-								GrainType: "Mytype",
-								ID:        "Myid",
-							}, identity)
-							return nil, errors.New("failed")
-						},
-					},
-				},
-				impl: nil,
+					ID:        "Myid",
+				}, identity)
+				return nil, errors.New("failed")
 			},
 		},
 	}
@@ -103,42 +91,24 @@ func TestActivationGrainActivationNoResources(t *testing.T) {
 	require.Equal(t, grainStateDeactivated, a.grainState)
 	require.True(t, deactivated)
 
-	err = a.NotifyObservable(grain.Anonymous(), "Fake", "Fake", []byte{})
-	require.Equal(t, ErrGrainDeactivating, err)
-
-	err = a.InvokeMethod(grain.Anonymous(), "Ping", []byte{}, time.Now().Add(time.Minute), func(out interface{}, err error) {
+	err = a.InvokeMethod(grain.Anonymous(), "Ping", time.Now().Add(time.Minute), nil, nil, func(err error) {
 		assert.Fail(t, "unexpected resolve")
 	})
 	require.Equal(t, ErrGrainDeactivating, err)
 
-	err = a.RegisterObserver(grain.Anonymous(), "Fake", []byte{}, time.Minute, func(err error) {
-		assert.Fail(t, "unexpected resolve")
-	})
-	require.Equal(t, ErrGrainDeactivating, err)
-
-	err = a.UnsubscribeObserver(grain.Anonymous(), "Fake", func(err error) {
-		assert.Fail(t, "unexpected resolve")
-	})
+	err = a.InvokeOneWayMethod(grain.Anonymous(), "Ping", time.Now().Add(time.Minute), nil)
 	require.Equal(t, ErrGrainDeactivating, err)
 }
 
 func TestActivationGrainActivatorFailure(t *testing.T) {
 	registrar := &mockRegistrar{
-		entries: map[string]mockRegistrarEntry{
-			"Mytype": {
-				desc: &descriptor.GrainDescription{
+		entries: map[string]descriptor.ActivatorFunc{
+			"Mytype": func(ctx context.Context, identity grain.Identity, services services.CoreGrainServices) (grain.Activation, error) {
+				assert.Equal(t, grain.Identity{
 					GrainType: "Mytype",
-					Activation: descriptor.ActivationDesc{
-						Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
-							assert.Equal(t, grain.Identity{
-								GrainType: "Mytype",
-								ID:        "Myid",
-							}, identity)
-							return nil, errors.New("failed")
-						},
-					},
-				},
-				impl: nil,
+					ID:        "Myid",
+				}, identity)
+				return nil, errors.New("failed")
 			},
 		},
 	}
@@ -168,47 +138,31 @@ func TestActivationGrainActivatorFailure(t *testing.T) {
 	require.Equal(t, grainStateDeactivated, a.grainState)
 	require.True(t, deactivated)
 
-	err = a.InvokeMethod(grain.Anonymous(), "Ping", []byte{}, time.Now().Add(time.Minute), func(out interface{}, err error) {
+	err = a.InvokeMethod(grain.Anonymous(), "Ping", time.Now().Add(time.Minute), nil, nil, func(err error) {
 		assert.Fail(t, "unexpected resolve")
 	})
 	require.Equal(t, ErrGrainDeactivating, err)
 
-	err = a.RegisterObserver(grain.Anonymous(), "Fake", []byte{}, time.Minute, func(err error) {
-		assert.Fail(t, "unexpected resolve")
-	})
-	require.Equal(t, ErrGrainDeactivating, err)
-
-	err = a.UnsubscribeObserver(grain.Anonymous(), "Fake", func(err error) {
-		assert.Fail(t, "unexpected resolve")
-	})
+	err = a.InvokeOneWayMethod(grain.Anonymous(), "Ping", time.Now().Add(time.Minute), nil)
 	require.Equal(t, ErrGrainDeactivating, err)
 }
 
 func TestActivationGrainActivatorFailureWithCalls(t *testing.T) {
 	// activationWait will make the activator wait until we have queued up
-	// an Calls (InvokeMethod, RegisterObserver, UnsubscribeObserver).
 	// A response is expected to the InvokeMethod call even when the activation
 	// fails
 	activationWait := make(chan struct{})
 	expectedErr := errors.New("failed")
 	registrar := &mockRegistrar{
-		entries: map[string]mockRegistrarEntry{
-			"Mytype": {
-				desc: &descriptor.GrainDescription{
-					GrainType: "Mytype",
-					Activation: descriptor.ActivationDesc{
-						Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
-							<-activationWait
-							return nil, expectedErr
-						},
-					},
-				},
-				impl: nil,
+		entries: map[string]descriptor.ActivatorFunc{
+			"Mytype": func(ctx context.Context, identity grain.Identity, services services.CoreGrainServices) (grain.Activation, error) {
+				<-activationWait
+				return nil, expectedErr
 			},
 		},
 	}
 	wg := sync.WaitGroup{}
-	wg.Add(3)
+	wg.Add(1)
 	timerService := mocks.NewTimerService(t)
 	siloClient := mocks.NewSiloClient(t)
 	resourceManager := noopResourceManager{}
@@ -220,148 +174,70 @@ func TestActivationGrainActivatorFailureWithCalls(t *testing.T) {
 		ID:        "Myid",
 	})
 	require.NoError(t, err)
-	err = a.InvokeMethod(grain.Anonymous(), "Ping", []byte{}, time.Now().Add(time.Minute), func(out interface{}, err error) {
+	err = a.InvokeMethod(grain.Anonymous(), "Ping", time.Now().Add(time.Minute), nil, nil, func(err error) {
 		defer wg.Done()
 		assert.Equal(t, expectedErr, err)
 	})
 	require.NoError(t, err)
 
-	err = a.RegisterObserver(grain.Anonymous(), "Fake", []byte{}, time.Minute, func(err error) {
-		defer wg.Done()
-		assert.Equal(t, expectedErr, err)
-	})
-	require.NoError(t, err)
-
-	err = a.UnsubscribeObserver(grain.Anonymous(), "Fake", func(err error) {
-		defer wg.Done()
-		assert.Equal(t, expectedErr, err)
-	})
 	require.NoError(t, err)
 	close(activationWait)
 	wg.Wait()
 }
 
-func TestActivationGrainUnknownCalls(t *testing.T) {
-	registrar := &mockRegistrar{
-		entries: map[string]mockRegistrarEntry{
-			"Mytype": {
-				desc: &descriptor.GrainDescription{
-					GrainType: "Mytype",
-					Activation: descriptor.ActivationDesc{
-						Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
-							return nil, nil
-						},
-					},
-				},
-				impl: nil,
-			},
-		},
-	}
-	wg := sync.WaitGroup{}
-	wg.Add(3)
-	timerService := mocks.NewTimerService(t)
-	siloClient := mocks.NewSiloClient(t)
-	resourceManager := noopResourceManager{}
-	log := logr.Discard()
+type mockActivation struct {
+	InvokeMethodFunc func(ctx context.Context, method string, sender grain.Identity, d grain.Deserializer, respSerializer grain.Serializer) error
+}
 
-	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 8, func(i grain.Identity) {})
-	a, err := grainActivator.ActivateGrainWithDefaultActivator(grain.Identity{
-		GrainType: "Mytype",
-		ID:        "Myid",
-	})
-	require.NoError(t, err)
-
-	err = a.NotifyObservable(grain.Anonymous(), "FakeType", "Fake", []byte{})
-	require.NoError(t, err)
-
-	err = a.InvokeMethod(grain.Anonymous(), "Ping", []byte{}, time.Now().Add(time.Minute), func(out interface{}, err error) {
-		defer wg.Done()
-		assert.Equal(t, ErrGrainMethodNotFound, err)
-	})
-	require.NoError(t, err)
-
-	err = a.RegisterObserver(grain.Anonymous(), "Fake", []byte{}, time.Minute, func(err error) {
-		defer wg.Done()
-		assert.Equal(t, ErrGrainObservableNotFound, err)
-	})
-	require.NoError(t, err)
-
-	err = a.UnsubscribeObserver(grain.Anonymous(), "Fake", func(err error) {
-		defer wg.Done()
-		assert.Equal(t, ErrGrainObservableNotFound, err)
-	})
-	require.NoError(t, err)
-	wg.Wait()
-
-	wg.Add(1)
-	a.StopAsync(func(err error) {
-		assert.NoError(t, err)
-		wg.Done()
-	})
-	wg.Wait()
+func (m mockActivation) InvokeMethod(ctx context.Context, method string, sender grain.Identity, d grain.Deserializer, respSerializer grain.Serializer) error {
+	return m.InvokeMethodFunc(ctx, method, sender, d, respSerializer)
 }
 
 func TestActivationGrainMailboxFull(t *testing.T) {
 	waitChan := make(chan struct{})
 	pingEntered := sync.WaitGroup{}
+	activation := mockActivation{
+		InvokeMethodFunc: func(ctx context.Context, method string, sender grain.Identity, d grain.Deserializer, respSerializer grain.Serializer) error {
+			pingEntered.Done()
+			<-waitChan
+			return nil
+		},
+	}
+
 	registrar := &mockRegistrar{
-		entries: map[string]mockRegistrarEntry{
-			"Mytype": {
-				desc: &descriptor.GrainDescription{
-					GrainType: "Mytype",
-					Activation: descriptor.ActivationDesc{
-						Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
-							return nil, nil
-						},
-					},
-					Methods: []descriptor.MethodDesc{
-						{
-							Name: "Ping",
-							Handler: func(srv interface{}, ctx context.Context, dec func(interface{}) error) (interface{}, error) {
-								pingEntered.Done()
-								<-waitChan
-								return nil, nil
-							},
-						},
-					},
-				},
-				impl: nil,
+		entries: map[string]descriptor.ActivatorFunc{
+			"Mytype": func(ctx context.Context, identity grain.Identity, services services.CoreGrainServices) (grain.Activation, error) {
+				return activation, nil
 			},
 		},
 	}
 	wg := sync.WaitGroup{}
-	wg.Add(3)
+	wg.Add(2)
 	timerService := mocks.NewTimerService(t)
 	siloClient := mocks.NewSiloClient(t)
 	resourceManager := noopResourceManager{}
 	log := logr.Discard()
 
-	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 2, func(i grain.Identity) {})
+	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 1, func(i grain.Identity) {})
 	a, err := grainActivator.ActivateGrainWithDefaultActivator(grain.Identity{
 		GrainType: "Mytype",
 		ID:        "Myid",
 	})
 	require.NoError(t, err)
 	pingEntered.Add(1)
-	err = a.InvokeMethod(grain.Anonymous(), "Ping", []byte{}, time.Now().Add(time.Minute), func(out interface{}, err error) {
+	err = a.InvokeMethod(grain.Anonymous(), "Ping", time.Now().Add(time.Minute), nil, nil, func(err error) {
 		defer wg.Done()
 	})
 	require.NoError(t, err)
 	pingEntered.Wait()
 
-	err = a.RegisterObserver(grain.Anonymous(), "Fake", []byte{}, time.Minute, func(err error) {
+	pingEntered.Add(1)
+	err = a.InvokeMethod(grain.Anonymous(), "Ping", time.Now().Add(time.Minute), nil, nil, func(err error) {
 		defer wg.Done()
-		assert.Equal(t, ErrGrainObservableNotFound, err)
 	})
 	require.NoError(t, err)
 
-	err = a.UnsubscribeObserver(grain.Anonymous(), "Fake", func(err error) {
-		defer wg.Done()
-		assert.Equal(t, ErrGrainObservableNotFound, err)
-	})
-	require.NoError(t, err)
-
-	err = a.InvokeMethod(grain.Anonymous(), "Ping", []byte{}, time.Now().Add(time.Minute), func(out interface{}, err error) {
+	err = a.InvokeMethod(grain.Anonymous(), "Ping", time.Now().Add(time.Minute), nil, nil, func(err error) {
 		assert.Fail(t, "unexpected call")
 	})
 	require.Equal(t, ErrInboxFull, err)
@@ -379,45 +255,35 @@ func TestActivationGrainMailboxFull(t *testing.T) {
 }
 
 type notEvictable struct {
-	grain.Identity
+	InvokeMethodFunc func(ctx context.Context, method string, sender grain.Identity, d grain.Deserializer, respSerializer grain.Serializer) error
 }
 
 func (*notEvictable) CanEvict(ctx context.Context) bool {
 	return false
 }
 
+func (m *notEvictable) InvokeMethod(ctx context.Context, method string, sender grain.Identity, d grain.Deserializer, respSerializer grain.Serializer) error {
+	return m.InvokeMethodFunc(ctx, method, sender, d, respSerializer)
+}
+
 func TestActivationGrainEvictionBlockedTest(t *testing.T) {
 	waitChan := make(chan struct{})
 	pingEntered := sync.WaitGroup{}
 	registrar := &mockRegistrar{
-		entries: map[string]mockRegistrarEntry{
-			"Mytype": {
-				desc: &descriptor.GrainDescription{
-					GrainType: "Mytype",
-					Activation: descriptor.ActivationDesc{
-						Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
-							return &notEvictable{
-								Identity: identity,
-							}, nil
-						},
+		entries: map[string]descriptor.ActivatorFunc{
+			"Mytype": func(ctx context.Context, identity grain.Identity, services services.CoreGrainServices) (grain.Activation, error) {
+				return &notEvictable{
+					InvokeMethodFunc: func(ctx context.Context, method string, sender grain.Identity, d grain.Deserializer, respSerializer grain.Serializer) error {
+						pingEntered.Done()
+						<-waitChan
+						return nil
 					},
-					Methods: []descriptor.MethodDesc{
-						{
-							Name: "Ping",
-							Handler: func(srv interface{}, ctx context.Context, dec func(interface{}) error) (interface{}, error) {
-								pingEntered.Done()
-								<-waitChan
-								return nil, nil
-							},
-						},
-					},
-				},
-				impl: nil,
+				}, nil
 			},
 		},
 	}
 	wg := sync.WaitGroup{}
-	wg.Add(2)
+	wg.Add(1)
 	timerService := mocks.NewTimerService(t)
 	siloClient := mocks.NewSiloClient(t)
 	resourceManager := noopResourceManager{}
@@ -430,17 +296,11 @@ func TestActivationGrainEvictionBlockedTest(t *testing.T) {
 	})
 	require.NoError(t, err)
 	pingEntered.Add(1)
-	err = a.InvokeMethod(grain.Anonymous(), "Ping", []byte{}, time.Now().Add(time.Minute), func(out interface{}, err error) {
+	err = a.InvokeMethod(grain.Anonymous(), "Ping", time.Now().Add(time.Minute), nil, nil, func(err error) {
 		defer wg.Done()
 	})
 	require.NoError(t, err)
 	pingEntered.Wait()
-
-	err = a.RegisterObserver(grain.Anonymous(), "Fake", []byte{}, time.Minute, func(err error) {
-		defer wg.Done()
-		assert.Equal(t, ErrGrainObservableNotFound, err)
-	})
-	require.NoError(t, err)
 
 	wg.Add(1)
 	a.EvictAsync(func(err error) {
@@ -457,14 +317,6 @@ func TestActivationGrainEvictionBlockedTest(t *testing.T) {
 	wg.Wait()
 
 	wg.Add(1)
-	err = a.RegisterObserver(grain.Anonymous(), "Fake", []byte{}, time.Minute, func(err error) {
-		defer wg.Done()
-		assert.Equal(t, ErrGrainObservableNotFound, err)
-	})
-	require.NoError(t, err)
-	wg.Wait()
-
-	wg.Add(1)
 	a.StopAsync(func(err error) {
 		assert.NoError(t, err)
 		wg.Done()
@@ -473,14 +325,20 @@ func TestActivationGrainEvictionBlockedTest(t *testing.T) {
 }
 
 type evictable struct {
-	grain.Identity
-	waitFor chan struct{}
-	entered chan struct{}
+	InvokeMethodFunc func(ctx context.Context, method string, sender grain.Identity, d grain.Deserializer, respSerializer grain.Serializer) error
+	DeactivateFunc   func(ctx context.Context)
 }
 
-func (e *evictable) Deactivate(ctx context.Context) {
-	close(e.entered)
-	<-e.waitFor
+func (*evictable) CanEvict(ctx context.Context) bool {
+	return true
+}
+
+func (m *evictable) InvokeMethod(ctx context.Context, method string, sender grain.Identity, d grain.Deserializer, respSerializer grain.Serializer) error {
+	return m.InvokeMethodFunc(ctx, method, sender, d, respSerializer)
+}
+
+func (m *evictable) Deactivate(ctx context.Context) {
+	m.DeactivateFunc(ctx)
 }
 
 func TestActivationGrainDeactivateOnEvict(t *testing.T) {
@@ -488,22 +346,18 @@ func TestActivationGrainDeactivateOnEvict(t *testing.T) {
 	deactivateEntered := make(chan struct{})
 	var e *evictable
 	registrar := &mockRegistrar{
-		entries: map[string]mockRegistrarEntry{
-			"Mytype": {
-				desc: &descriptor.GrainDescription{
-					GrainType: "Mytype",
-					Activation: descriptor.ActivationDesc{
-						Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
-							e = &evictable{
-								entered:  deactivateEntered,
-								Identity: identity,
-								waitFor:  waitChan,
-							}
-							return e, nil
-						},
+		entries: map[string]descriptor.ActivatorFunc{
+			"Mytype": func(ctx context.Context, identity grain.Identity, services services.CoreGrainServices) (grain.Activation, error) {
+				e = &evictable{
+					InvokeMethodFunc: func(ctx context.Context, method string, sender grain.Identity, d grain.Deserializer, respSerializer grain.Serializer) error {
+						return nil
 					},
-				},
-				impl: nil,
+					DeactivateFunc: func(ctx context.Context) {
+						close(deactivateEntered)
+						<-waitChan
+					},
+				}
+				return e, nil
 			},
 		},
 	}
@@ -539,22 +393,18 @@ func TestActivationGrainDeactivateOnStop(t *testing.T) {
 	deactivateEntered := make(chan struct{})
 	var e *evictable
 	registrar := &mockRegistrar{
-		entries: map[string]mockRegistrarEntry{
-			"Mytype": {
-				desc: &descriptor.GrainDescription{
-					GrainType: "Mytype",
-					Activation: descriptor.ActivationDesc{
-						Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
-							e = &evictable{
-								entered:  deactivateEntered,
-								Identity: identity,
-								waitFor:  waitChan,
-							}
-							return e, nil
-						},
+		entries: map[string]descriptor.ActivatorFunc{
+			"Mytype": func(ctx context.Context, identity grain.Identity, services services.CoreGrainServices) (grain.Activation, error) {
+				e = &evictable{
+					InvokeMethodFunc: func(ctx context.Context, method string, sender grain.Identity, d grain.Deserializer, respSerializer grain.Serializer) error {
+						return nil
 					},
-				},
-				impl: nil,
+					DeactivateFunc: func(ctx context.Context) {
+						close(deactivateEntered)
+						<-waitChan
+					},
+				}
+				return e, nil
 			},
 		},
 	}
@@ -583,196 +433,4 @@ func TestActivationGrainDeactivateOnStop(t *testing.T) {
 	close(waitChan)
 	wg.Wait()
 	require.Equal(t, grainStateDeactivated, a.grainState)
-}
-
-type testActivation struct {
-	grain.Identity
-}
-
-func TestActivationGrainObserverSameType(t *testing.T) {
-	observerIdentity := grain.Identity{
-		GrainType: "Mytype",
-		ID:        "Observer",
-	}
-	activation := &testActivation{
-		grain.Identity{
-			GrainType: "Mytype",
-			ID:        "Myid",
-		},
-	}
-	var expectedError error
-	registerCalls := 0
-	unsubscribeCalls := 0
-	handleCalls := 0
-	registrar := &mockRegistrar{
-		entries: map[string]mockRegistrarEntry{
-			"Mytype": {
-				desc: &descriptor.GrainDescription{
-					GrainType: "Mytype",
-					Activation: descriptor.ActivationDesc{
-						Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
-							return activation, nil
-						},
-					},
-					Observables: []descriptor.ObservableDesc{
-						{
-							Name: "MyObservable",
-							Handler: func(srv interface{}, ctx context.Context, dec func(interface{}) error) error {
-								assert.Equal(t, activation, srv)
-								handleCalls++
-								return nil
-							},
-							RegisterHandler: func(srv interface{}, ctx context.Context, observer grain.Identity, registrationTimeout time.Duration, dec func(interface{}) error) error {
-								assert.Equal(t, activation, srv)
-								assert.Equal(t, observerIdentity, observer)
-								registerCalls += 1
-								return expectedError
-							},
-							UnsubscribeHandler: func(srv interface{}, ctx context.Context, observer grain.Identity) error {
-								assert.Equal(t, activation, srv)
-								assert.Equal(t, observerIdentity, observer)
-								unsubscribeCalls += 1
-								return expectedError
-							},
-						},
-					},
-				},
-				impl: nil,
-			},
-		},
-	}
-	wg := sync.WaitGroup{}
-	timerService := mocks.NewTimerService(t)
-	siloClient := mocks.NewSiloClient(t)
-	resourceManager := noopResourceManager{}
-	log := logr.Discard()
-
-	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 2, func(i grain.Identity) {})
-	a, err := grainActivator.ActivateGrainWithDefaultActivator(grain.Identity{
-		GrainType: "Mytype",
-		ID:        "Myid",
-	})
-	require.NoError(t, err)
-
-	wg.Add(1)
-	err = a.RegisterObserver(observerIdentity, "MyObservable", []byte{}, time.Minute, func(err error) {
-		defer wg.Done()
-		assert.NoError(t, err)
-	})
-	require.NoError(t, err)
-	wg.Wait()
-
-	wg.Add(1)
-	err = a.UnsubscribeObserver(observerIdentity, "MyObservable", func(err error) {
-		defer wg.Done()
-		assert.NoError(t, err)
-	})
-	require.NoError(t, err)
-	wg.Wait()
-
-	err = a.NotifyObservable(grain.Identity{
-		GrainType: "Mytype",
-		ID:        "Observable",
-	}, "Mytype", "MyObservable", []byte{})
-	require.NoError(t, err)
-
-	wg.Add(1)
-	expectedError = errors.New("expected error")
-	err = a.RegisterObserver(observerIdentity, "MyObservable", []byte{}, time.Minute, func(err error) {
-		defer wg.Done()
-		assert.Equal(t, expectedError, err)
-	})
-	require.NoError(t, err)
-	wg.Wait()
-
-	wg.Add(1)
-	err = a.UnsubscribeObserver(observerIdentity, "MyObservable", func(err error) {
-		defer wg.Done()
-		assert.Equal(t, expectedError, err)
-	})
-	require.NoError(t, err)
-	wg.Wait()
-
-	wg.Add(1)
-	a.StopAsync(func(err error) {
-		defer wg.Done()
-		assert.NoError(t, err)
-	})
-
-	wg.Wait()
-
-	require.Equal(t, 1, handleCalls)
-	require.Equal(t, 2, registerCalls)
-	require.Equal(t, 2, unsubscribeCalls)
-}
-
-func TestActivationGrainNotifyObserverDifferentTypes(t *testing.T) {
-	observableIdentity := grain.Identity{
-		GrainType: "MyObservableType",
-		ID:        "Observer",
-	}
-	activation := &testActivation{
-		grain.Identity{
-			GrainType: "Mytype",
-			ID:        "Myid",
-		},
-	}
-	handleCalls := 0
-	wg := sync.WaitGroup{}
-
-	registrar := &mockRegistrar{
-		entries: map[string]mockRegistrarEntry{
-			"Mytype": {
-				desc: &descriptor.GrainDescription{
-					GrainType: "Mytype",
-					Activation: descriptor.ActivationDesc{
-						Handler: func(activator interface{}, ctx context.Context, coreServices services.CoreGrainServices, identity grain.Identity) (grain.GrainReference, error) {
-							return activation, nil
-						},
-					},
-				},
-			},
-			"MyObservableType": {
-				desc: &descriptor.GrainDescription{
-					GrainType: "MyObservableType",
-					Observables: []descriptor.ObservableDesc{
-						{
-							Name: "MyObservable",
-							Handler: func(srv interface{}, ctx context.Context, dec func(interface{}) error) error {
-								defer wg.Done()
-								assert.Equal(t, activation, srv)
-								handleCalls++
-								return nil
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-	timerService := mocks.NewTimerService(t)
-	siloClient := mocks.NewSiloClient(t)
-	resourceManager := noopResourceManager{}
-	log := logr.Discard()
-
-	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 2, func(i grain.Identity) {})
-	a, err := grainActivator.ActivateGrainWithDefaultActivator(grain.Identity{
-		GrainType: "Mytype",
-		ID:        "Myid",
-	})
-	require.NoError(t, err)
-
-	wg.Add(1)
-	err = a.NotifyObservable(observableIdentity, "MyObservableType", "MyObservable", []byte{})
-	require.NoError(t, err)
-	wg.Wait()
-
-	wg.Add(1)
-	a.StopAsync(func(err error) {
-		defer wg.Done()
-		assert.NoError(t, err)
-	})
-	wg.Wait()
-
-	require.Equal(t, 1, handleCalls)
 }

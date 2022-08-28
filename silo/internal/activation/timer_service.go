@@ -51,3 +51,10 @@ func (g *grainTimerServiceImpl) Cancel(name string) bool {
 	}
 	return false
 }
+
+func (g *grainTimerServiceImpl) Destroy() {
+	for k := range g.timers {
+		g.timerService.Cancel(g.grainIdentity, k)
+	}
+	g.timers = nil
+}

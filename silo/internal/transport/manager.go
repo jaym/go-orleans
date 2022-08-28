@@ -38,9 +38,7 @@ func NewManager(log logr.Logger, c clock.Clock, handler TransportHandler) *Manag
 
 type TransportHandler interface {
 	ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, payload []byte, promise InvokeMethodPromise)
-	ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, payload []byte, registrationTimeout time.Duration, promise RegisterObserverPromise)
-	ReceiveObserverNotification(ctx context.Context, sender grain.Identity, receivers []grain.Identity, observableType string, name string, payload []byte)
-	ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, promise UnsubscribeObserverPromise)
+	ReceiveInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity, receivers []grain.Identity, name string, payload []byte)
 }
 
 type managedTransport struct {
@@ -53,26 +51,16 @@ type InvokeMethodResponse struct {
 type InvokeMethodPromise = future.Promise[InvokeMethodResponse]
 type InvokeMethodFuture = future.Future[InvokeMethodResponse]
 
-type RegisterObserverResponse struct{}
-type RegisterObserverPromise = future.Promise[RegisterObserverResponse]
-type RegisterObserverFuture = future.Future[RegisterObserverResponse]
-
-type UnsubscribeObserverResponse struct{}
-type UnsubscribeObserverPromise = future.Promise[UnsubscribeObserverResponse]
-type UnsubscribeObserverFuture = future.Future[UnsubscribeObserverResponse]
-
 type managedTransportInternal struct {
 	TransportHandler
-	log                         logr.Logger
-	clock                       clock.Clock
-	transport                   cluster.Transport
-	lock                        sync.Mutex
-	stopped                     bool
-	bgWorkerCancel              context.CancelFunc
-	deadlineHeap                *DeadlineHeap
-	invokeMethodPromises        map[string]InvokeMethodPromise
-	registerObserverPromises    map[string]RegisterObserverPromise
-	unsubscribeObserverPromises map[string]UnsubscribeObserverPromise
+	log                  logr.Logger
+	clock                clock.Clock
+	transport            cluster.Transport
+	lock                 sync.Mutex
+	stopped              bool
+	bgWorkerCancel       context.CancelFunc
+	deadlineHeap         *DeadlineHeap
+	invokeMethodPromises map[string]InvokeMethodPromise
 }
 
 func (h *managedTransportInternal) backgroundCleanupWorker(ctx context.Context) {
@@ -111,45 +99,9 @@ func (h *managedTransportInternal) stop() error {
 	}
 	h.invokeMethodPromises = nil
 
-	for _, p := range h.registerObserverPromises {
-		p.Reject(ErrTransportStopped)
-	}
-	h.registerObserverPromises = nil
-
-	for _, p := range h.unsubscribeObserverPromises {
-		p.Reject(ErrTransportStopped)
-	}
-	h.unsubscribeObserverPromises = nil
-
 	h.stopped = true
 
 	return errTransportStop
-}
-
-func (h *managedTransportInternal) registerRegisterObserverPromise(uuid string, deadline time.Time) RegisterObserverFuture {
-	f, p := future.NewFuture[RegisterObserverResponse](deadline)
-	h.lock.Lock()
-	defer h.lock.Unlock()
-	if h.stopped {
-		p.Reject(ErrTransportStopped)
-	} else {
-		h.deadlineHeap.ExpireAndAdd(RegisterObserverRequestType, uuid, deadline, h.expirePromises)
-		h.registerObserverPromises[uuid] = p
-	}
-	return f
-}
-
-func (h *managedTransportInternal) registerUnsubscribeObserverPromise(uuid string, deadline time.Time) UnsubscribeObserverFuture {
-	f, p := future.NewFuture[UnsubscribeObserverResponse](deadline)
-	h.lock.Lock()
-	defer h.lock.Unlock()
-	if h.stopped {
-		p.Reject(ErrTransportStopped)
-	} else {
-		h.deadlineHeap.ExpireAndAdd(UnregisterObserverRequestType, uuid, deadline, h.expirePromises)
-		h.unsubscribeObserverPromises[uuid] = p
-	}
-	return f
 }
 
 func (h *managedTransportInternal) expirePromises(typ RequestType, uuid string) {
@@ -159,16 +111,6 @@ func (h *managedTransportInternal) expirePromises(typ RequestType, uuid string) 
 		if p, ok := h.invokeMethodPromises[uuid]; ok {
 			p.Reject(context.DeadlineExceeded)
 			delete(h.invokeMethodPromises, uuid)
-		}
-	case RegisterObserverRequestType:
-		if p, ok := h.registerObserverPromises[uuid]; ok {
-			p.Reject(context.DeadlineExceeded)
-			delete(h.registerObserverPromises, uuid)
-		}
-	case UnregisterObserverRequestType:
-		if p, ok := h.unsubscribeObserverPromises[uuid]; ok {
-			p.Reject(context.DeadlineExceeded)
-			delete(h.unsubscribeObserverPromises, uuid)
 		}
 	}
 }
@@ -184,19 +126,6 @@ func (h *managedTransportInternal) registerInvokeMethodPromise(uuid string, dead
 		h.invokeMethodPromises[uuid] = p
 	}
 	return f
-}
-
-func (h *managedTransportInternal) ReceiveAckRegisterObserver(ctx context.Context, receiver grain.Identity, uuid string, errData []byte) {
-	h.lock.Lock()
-	defer h.lock.Unlock()
-
-	p, ok := h.registerObserverPromises[uuid]
-	if !ok {
-		h.log.V(1).Info("promise not found", "handler", "ack-register-observer", "receiver", receiver, "uuid", uuid)
-		return
-	}
-	rejectOrResolve(p, errData, RegisterObserverResponse{})
-	delete(h.invokeMethodPromises, uuid)
 }
 
 func (h *managedTransportInternal) ReceiveInvokeMethodResponse(ctx context.Context, receiver grain.Identity, uuid string, payload []byte, errData []byte) {
@@ -227,45 +156,6 @@ func (h *managedTransportInternal) ReceiveInvokeMethodRequest(ctx context.Contex
 	h.TransportHandler.ReceiveInvokeMethodRequest(ctx, sender, receiver, method, payload, p)
 }
 
-func (h *managedTransportInternal) ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, payload []byte, opts cluster.EnqueueRegisterObserverRequestOptions, deadline time.Time) {
-	p := future.NewFuncPromise(deadline, func(_ RegisterObserverResponse, e error) {
-		if err := h.transport.EnqueueAckRegisterObserver(context.TODO(), observer, uuid, encodeError(e)); err != nil {
-			h.log.V(0).Error(err, "failed to response to ack observer registration",
-				"observer", observer,
-				"observable", observable,
-				"name", name,
-				"uuid", uuid)
-		}
-	})
-	h.TransportHandler.ReceiveRegisterObserverRequest(ctx, observer, observable, name, payload, opts.RegistrationTimeout, p)
-}
-
-func (h *managedTransportInternal) ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, uuid string, deadline time.Time) {
-	p := future.NewFuncPromise(deadline, func(_ UnsubscribeObserverResponse, e error) {
-		if err := h.transport.EnqueueAckUnsubscribeObserver(context.TODO(), observer, uuid, encodeError(e)); err != nil {
-			h.log.V(0).Error(err, "failed to response to ack unsubscribe observer",
-				"observer", observer,
-				"observable", observable,
-				"name", name,
-				"uuid", uuid)
-		}
-	})
-	h.TransportHandler.ReceiveUnsubscribeObserverRequest(ctx, observer, observable, name, p)
-}
-
-func (h *managedTransportInternal) ReceiveAckUnsubscribeObserver(ctx context.Context, receiver grain.Identity, uuid string, errData []byte) {
-	h.lock.Lock()
-	defer h.lock.Unlock()
-
-	p, ok := h.unsubscribeObserverPromises[uuid]
-	if !ok {
-		h.log.V(1).Info("promise not found", "handler", "ack-register-observer", "receiver", receiver, "uuid", uuid)
-		return
-	}
-	rejectOrResolve(p, errData, UnsubscribeObserverResponse{})
-	delete(h.invokeMethodPromises, uuid)
-}
-
 func (m *Manager) AddTransport(nodeName cluster.Location, creator func() (cluster.Transport, error)) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -282,15 +172,13 @@ func (m *Manager) AddTransport(nodeName cluster.Location, creator func() (cluste
 	bgWorkerCxt, bgWorkerCancel := context.WithCancel(context.Background())
 	mt := &managedTransport{
 		internal: &managedTransportInternal{
-			log:                         m.log.WithName(string(nodeName)),
-			clock:                       m.clock,
-			transport:                   transport,
-			TransportHandler:            m.handler,
-			bgWorkerCancel:              bgWorkerCancel,
-			deadlineHeap:                NewDeadlineHeap(m.clock),
-			invokeMethodPromises:        make(map[string]InvokeMethodPromise),
-			registerObserverPromises:    make(map[string]RegisterObserverPromise),
-			unsubscribeObserverPromises: make(map[string]UnsubscribeObserverPromise),
+			log:                  m.log.WithName(string(nodeName)),
+			clock:                m.clock,
+			transport:            transport,
+			TransportHandler:     m.handler,
+			bgWorkerCancel:       bgWorkerCancel,
+			deadlineHeap:         NewDeadlineHeap(m.clock),
+			invokeMethodPromises: make(map[string]InvokeMethodPromise),
 		},
 	}
 	mt.internal.backgroundCleanupWorker(bgWorkerCxt)
@@ -355,41 +243,7 @@ func (m *Manager) InvokeMethod(ctx context.Context, sender grain.Identity, recei
 	return f, nil
 }
 
-func (m *Manager) RegisterObserver(ctx context.Context, observer grain.Identity, observable cluster.GrainAddress, name string, uuid string, payload []byte, registrationTimeout time.Duration) (RegisterObserverFuture, error) {
-	t, err := m.getTransport(observable.Location)
-	if err != nil {
-		return nil, err
-	}
-
-	deadline := m.getDeadline(ctx)
-
-	f := t.internal.registerRegisterObserverPromise(uuid, deadline)
-	if err := t.internal.transport.EnqueueRegisterObserverRequest(ctx, observer, observable.Identity, name, uuid, payload, cluster.EnqueueRegisterObserverRequestOptions{
-		RegistrationTimeout: registrationTimeout,
-	}); err != nil {
-		// TODO: if an error is returned, its possible that we never resolved the promise
-		return nil, err
-	}
-	return f, nil
-}
-
-func (m *Manager) UnsubscribeObserver(ctx context.Context, observer grain.Identity, observable cluster.GrainAddress, name string, uuid string) (UnsubscribeObserverFuture, error) {
-	t, err := m.getTransport(observable.Location)
-	if err != nil {
-		return nil, err
-	}
-
-	deadline := m.getDeadline(ctx)
-
-	f := t.internal.registerUnsubscribeObserverPromise(uuid, deadline)
-	if err := t.internal.transport.EnqueueUnsubscribeObserverRequest(ctx, observer, observable.Identity, name, uuid); err != nil {
-		// TODO: if an error is returned, its possible that we never resolved the promise
-		return nil, err
-	}
-	return f, nil
-}
-
-func (m *Manager) ObserverNotificationAsync(ctx context.Context, sender grain.Identity, receivers []cluster.GrainAddress, observableType string, name string, payload []byte) error {
+func (m *Manager) InvokeMethodOneWay(ctx context.Context, sender grain.Identity, receivers []cluster.GrainAddress, name string, payload []byte) error {
 	locations := map[cluster.Location][]grain.Identity{}
 	for _, r := range receivers {
 		locations[r.Location] = append(locations[r.Location], r.Identity)
@@ -401,7 +255,7 @@ func (m *Manager) ObserverNotificationAsync(ctx context.Context, sender grain.Id
 			combinedErrors = errors.CombineErrors(combinedErrors, err)
 			continue
 		}
-		if err := t.internal.transport.EnqueueObserverNotification(ctx, sender, rs, observableType, name, payload); err != nil {
+		if err := t.internal.transport.EnqueueInvokeOneWayMethodRequest(ctx, sender, rs, name, payload); err != nil {
 			combinedErrors = errors.CombineErrors(combinedErrors, err)
 		}
 	}

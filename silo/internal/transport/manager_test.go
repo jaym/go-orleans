@@ -25,13 +25,8 @@ func (h *mockTransportHandler) ReceiveInvokeMethodRequest(ctx context.Context, s
 		Response: []byte("testresponse-" + string(payload)),
 	})
 }
-func (*mockTransportHandler) ReceiveRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, payload []byte, registrationTimeout time.Duration, promise RegisterObserverPromise) {
 
-}
-func (*mockTransportHandler) ReceiveObserverNotification(ctx context.Context, sender grain.Identity, receivers []grain.Identity, observableType string, name string, payload []byte) {
-
-}
-func (*mockTransportHandler) ReceiveUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity, name string, promise UnsubscribeObserverPromise) {
+func (*mockTransportHandler) ReceiveInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity, receivers []grain.Identity, name string, payload []byte) {
 
 }
 
@@ -80,8 +75,7 @@ func (m *mockTransport) Stop() error {
 	return m.err
 }
 
-func (m *mockTransport) EnqueueInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity,
-	method string, uuid string, payload []byte) error {
+func (m *mockTransport) EnqueueInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, uuid string, payload []byte) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	if m.err != nil {
@@ -100,61 +94,17 @@ func (m *mockTransport) EnqueueInvokeMethodRequest(ctx context.Context, sender g
 	return nil
 }
 
-func (m *mockTransport) EnqueueInvokeMethodResponse(ctx context.Context, receiver grain.Identity, uuid string,
-	payload []byte, err []byte) error {
+func (m *mockTransport) EnqueueInvokeMethodResponse(ctx context.Context, receiver grain.Identity, uuid string, payload []byte, err []byte) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
 	return m.err
 }
 
-func (m *mockTransport) EnqueueRegisterObserverRequest(ctx context.Context, observer grain.Identity, observable grain.Identity,
-	name string, uuid string, payload []byte, opts cluster.EnqueueRegisterObserverRequestOptions) error {
-
+func (m *mockTransport) EnqueueInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity, receivers []grain.Identity, methodName string, payload []byte) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	if m.err != nil {
-		return m.err
-	}
-	if strings.HasPrefix(uuid, "drop-") {
-		return nil
-	}
-
-	d := m.delayFunc(uuid)
-	m.clock.AfterFunc(d, func() {
-		_, errData := m.responseFunc(uuid)
-		m.h.ReceiveAckRegisterObserver(context.Background(), observer, uuid, errData)
-	})
-
-	return nil
-}
-
-func (m *mockTransport) EnqueueAckRegisterObserver(ctx context.Context, receiver grain.Identity,
-	uuid string, errOut []byte) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	return m.err
-}
-
-func (m *mockTransport) EnqueueObserverNotification(ctx context.Context, sender grain.Identity, receivers []grain.Identity,
-	observableType string, name string, payload []byte) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	return m.err
-}
-
-func (m *mockTransport) EnqueueUnsubscribeObserverRequest(ctx context.Context, observer grain.Identity,
-	observable grain.Identity, name string, uuid string) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	return m.err
-}
-func (m *mockTransport) EnqueueAckUnsubscribeObserver(ctx context.Context, receiver grain.Identity,
-	uuid string, errOut []byte) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
 	return m.err
 }
 
@@ -304,40 +254,6 @@ func TestManager(t *testing.T) {
 		c.Add(2 * time.Second)
 		_, err = f.Await(context.Background())
 		require.Equal(t, context.DeadlineExceeded, err)
-	})
-
-	t.Run("RegisterObserver success", func(t *testing.T) {
-		for i := 0; i < 10; i++ {
-			n := m.RandomNode()
-			require.Contains(t, transports, n)
-			observer := grain.Identity{
-				GrainType: "Observer",
-				ID:        n,
-			}
-			observable := cluster.GrainAddress{
-				Location: cluster.Location(n),
-				Identity: grain.Identity{
-					GrainType: "Test",
-					ID:        n,
-				},
-			}
-			payload := []byte("testpayload")
-			futures := []RegisterObserverFuture{}
-
-			for j := 0; j < 10; j++ {
-				uuid := "RegisterObserverTest-" + ksuid.New().String()
-				f, err := m.RegisterObserver(context.Background(), observer, observable, "TestRegisterObserver", uuid, payload, time.Minute)
-				require.NoError(t, err)
-				futures = append(futures, f)
-			}
-			c.Add(time.Millisecond)
-
-			for j := range futures {
-				f := futures[j]
-				_, err := f.Await(context.Background())
-				require.NoError(t, err)
-			}
-		}
 	})
 
 }

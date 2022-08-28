@@ -2,7 +2,6 @@ package silo
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,42 +16,6 @@ import (
 	"github.com/jaym/go-orleans/silo/services/cluster"
 	"github.com/jaym/go-orleans/silo/services/timer"
 )
-
-type InvokeMethodRequest struct {
-	Sender      grain.Identity
-	Receiver    grain.Identity
-	Method      string
-	in          []byte
-	deadline    time.Time
-	ResolveFunc func(interface{}, error)
-}
-
-type RegisterObserverRequest struct {
-	Observer            grain.Identity
-	Observable          grain.Identity
-	Name                string
-	UUID                string
-	In                  []byte
-	ResolveFunc         func(error)
-	RegistrationTimeout time.Duration
-}
-
-type UnsubscribeObserverRequest struct {
-	Observer    grain.Identity
-	Observable  grain.Identity
-	Name        string
-	UUID        string
-	ResolveFunc func(error)
-}
-
-type ObserverNotification struct {
-	Sender         grain.Identity
-	Receivers      []grain.Identity
-	ObservableType string
-	Name           string
-	UUID           string
-	In             []byte
-}
 
 type TimerTriggerNotification struct {
 	Receiver grain.Identity
@@ -135,50 +98,33 @@ func (m *GrainActivationManagerImpl) Start(ctx context.Context) error {
 	return nil
 }
 
-func (m *GrainActivationManagerImpl) EnqueueInvokeMethodRequest(req InvokeMethodRequest) error {
-	activation, err := m.getActivation(req.Receiver, true)
+func (m *GrainActivationManagerImpl) EnqueueInvokeMethodRequest(sender grain.Identity,
+	receiver grain.Identity, methodName string, deadline time.Time,
+	dec grain.Deserializer, ser grain.Serializer, resolve func(error)) error {
+	activation, err := m.getActivation(receiver, true)
 	if err != nil {
 		return err
 	}
 
-	return activation.InvokeMethod(req.Sender, req.Method, req.in, req.deadline, req.ResolveFunc)
+	return activation.InvokeMethod(sender, methodName, deadline, dec, ser, resolve)
 }
 
-func (m *GrainActivationManagerImpl) EnqueueRegisterObserverRequest(req RegisterObserverRequest) error {
-	activation, err := m.getActivation(req.Observable, true)
-	if err != nil {
-		return err
-	}
-
-	return activation.RegisterObserver(req.Observer, req.Name, req.In, req.RegistrationTimeout, req.ResolveFunc)
-}
-
-func (m *GrainActivationManagerImpl) EnqueueUnsubscribeObserverRequest(req UnsubscribeObserverRequest) error {
-	activation, err := m.getActivation(req.Observable, true)
-	if err != nil {
-		return err
-	}
-
-	return activation.UnsubscribeObserver(req.Observer, req.Name, req.ResolveFunc)
-}
-
-func (m *GrainActivationManagerImpl) EnqueueObserverNotification(req ObserverNotification) error {
-	var errs []string
-	for _, receiver := range req.Receivers {
+func (m *GrainActivationManagerImpl) EnqueueInvokeOneWayMethodRequest(sender grain.Identity,
+	receivers []grain.Identity, methodName string, dec grain.Deserializer) error {
+	for _, receiver := range receivers {
 		activation, err := m.getActivation(receiver, true)
 		if err != nil {
-			errs = append(errs, err.Error())
+			if err != ErrGrainActivationNotFound {
+				m.log.V(0).Error(err, "failed to get grain activation", "method", methodName,
+					"receiver", receiver.String())
+			}
 			continue
 		}
-		err = activation.NotifyObservable(req.Sender, req.ObservableType, req.Name, req.In)
-		if err != nil {
-			errs = append(errs, err.Error())
-			continue
+		// TODO:  deadline
+		if err := activation.InvokeOneWayMethod(sender, methodName, time.Now().Add(time.Minute), dec.CloneAndReset()); err != nil {
+			m.log.V(0).Error(err, "failed invoke one way method", "method", methodName,
+				"receiver", receiver.String())
 		}
-	}
-
-	if len(errs) > 0 {
-		return errors.New(strings.Join(errs, " : "))
 	}
 
 	return nil
