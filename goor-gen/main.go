@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -203,19 +204,25 @@ func (l *Loader) createParameter(v *types.Var, position int) *GoorParameter {
 	_, isPointer := v.Type().(*types.Pointer)
 	bt, isBasic := v.Type().Underlying().(*types.Basic)
 	serializerType := "Interface"
-
+	var basicTypeName string
+	var basicSerializeTypeName string
 	if isBasic {
+		basicTypeName = bt.Name()
+		basicSerializeTypeName = basicTypeName
 		btInfo := bt.Info()
 		if btInfo&types.IsBoolean != 0 {
 			serializerType = "Bool"
 		} else if btInfo&types.IsInteger != 0 {
 			if btInfo&types.IsUnsigned != 0 {
 				serializerType = "UInt64"
+				basicSerializeTypeName = "uint64"
 			} else {
 				serializerType = "Int64"
+				basicSerializeTypeName = "int64"
 			}
 		} else if btInfo&types.IsFloat != 0 {
 			serializerType = "Float"
+			basicSerializeTypeName = "float64"
 		} else if btInfo&types.IsString != 0 {
 			serializerType = "String"
 		}
@@ -236,13 +243,15 @@ func (l *Loader) createParameter(v *types.Var, position int) *GoorParameter {
 		name = "p" + strconv.Itoa(position)
 	}
 	return &GoorParameter{
-		Name:           name,
-		Type:           v.Type(),
-		SerializerType: serializerType,
-		IsPointer:      isPointer,
-		IsBasic:        isBasic,
-		IsObserver:     isObserver,
-		l:              l,
+		Name:                   name,
+		Type:                   v.Type(),
+		SerializerType:         serializerType,
+		BasicTypeName:          basicTypeName,
+		BasicSerializeTypeName: basicSerializeTypeName,
+		IsPointer:              isPointer,
+		IsBasic:                isBasic,
+		IsObserver:             isObserver,
+		l:                      l,
 	}
 }
 
@@ -278,12 +287,14 @@ func (l *Loader) createMethods(pkg *packages.Package, ifaceTy *ast.InterfaceType
 }
 
 type GoorParameter struct {
-	Name           string
-	Type           types.Type
-	SerializerType string
-	IsPointer      bool
-	IsBasic        bool
-	IsObserver     bool
+	Name                   string
+	Type                   types.Type
+	SerializerType         string
+	BasicTypeName          string
+	BasicSerializeTypeName string
+	IsPointer              bool
+	IsBasic                bool
+	IsObserver             bool
 
 	l *Loader
 }
@@ -467,6 +478,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	fmt.Fprintln(os.Stdout, header)
 	for _, grainDef := range grainDefs {
 		err = t.ExecuteTemplate(os.Stdout, "Grain", grainDef)
 		if err != nil {
@@ -474,3 +486,16 @@ func main() {
 		}
 	}
 }
+
+var header = `package gengo
+
+import (
+	"context"
+	"errors"
+
+	"github.com/jaym/go-orleans-chat-example/gen"
+	"github.com/jaym/go-orleans/grain"
+	"github.com/jaym/go-orleans/grain/descriptor"
+	"github.com/jaym/go-orleans/grain/services"
+)
+`

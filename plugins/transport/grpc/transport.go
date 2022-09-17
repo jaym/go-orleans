@@ -320,11 +320,7 @@ func (t *transport) failSendMsg(ctx context.Context, msg *internal.TransportMess
 		req := m.InvokeMethodReq
 		h.ReceiveInvokeMethodResponse(ctx, grainIdent(req.Sender), req.Uuid, nil, ErrFailedRPCBytes)
 	case *internal.TransportMessage_InvokeMethodResp:
-	case *internal.TransportMessage_RegisterObserver:
-		req := m.RegisterObserver
-		h.ReceiveAckRegisterObserver(ctx, grainIdent(req.Observer), req.Uuid, ErrFailedRPCBytes)
-	case *internal.TransportMessage_AckRegisterObserver:
-	case *internal.TransportMessage_ObserverNotification:
+	case *internal.TransportMessage_InvokeOneWayMethodReq:
 	default:
 		t.log.Info("invalid message received")
 	}
@@ -351,23 +347,6 @@ func (t *transport) handleMsg(ctx context.Context, h cluster.TransportHandler, m
 	case *internal.TransportMessage_InvokeMethodResp:
 		req := m.InvokeMethodResp
 		h.ReceiveInvokeMethodResponse(ctx, grainIdent(req.Receiver), req.Uuid, req.Payload, req.Err)
-	case *internal.TransportMessage_RegisterObserver:
-		req := m.RegisterObserver
-		h.ReceiveRegisterObserverRequest(ctx, grainIdent(req.Observer), grainIdent(req.Observable), req.Name, req.Uuid, req.Payload, cluster.EnqueueRegisterObserverRequestOptions{
-			RegistrationTimeout: time.Duration(req.GetOpts().GetRegistrationTimeoutMillis()) * time.Millisecond,
-		}, deadline)
-	case *internal.TransportMessage_AckRegisterObserver:
-		req := m.AckRegisterObserver
-		h.ReceiveAckRegisterObserver(ctx, grainIdent(req.Receiver), req.Uuid, req.Err)
-	case *internal.TransportMessage_ObserverNotification:
-		req := m.ObserverNotification
-		h.ReceiveObserverNotification(ctx, grainIdent(req.Sender), grainIdents(req.Receivers), req.ObservableType, req.Name, req.Payload)
-	case *internal.TransportMessage_UnsubscribeObserver:
-		req := m.UnsubscribeObserver
-		h.ReceiveUnsubscribeObserverRequest(ctx, grainIdent(req.Observer), grainIdent(req.Observable), req.Name, req.Uuid, deadline)
-	case *internal.TransportMessage_AckUnsubscribeObserver:
-		req := m.AckUnsubscribeObserver
-		h.ReceiveAckUnsubscribeObserver(ctx, grainIdent(req.Receiver), req.Uuid, req.Err)
 	default:
 		t.log.Info("invalid message received")
 	}

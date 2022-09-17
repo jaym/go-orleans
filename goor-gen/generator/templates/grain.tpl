@@ -45,7 +45,7 @@ if err != nil {
 	return err
 }
 
-arg{{.Name}} := {{ qualifiedArgType . }}Ref(s.siloClient, arg{{.Name}}Identity)
+arg{{.Name}} := {{ qualifiedArgType . }}Ref(__s.siloClient, arg{{.Name}}Identity)
 {{ else if eq .SerializerType "Interface" }}
 arg{{ .Name }} := new({{qualifiedArgType .}})
 err = dec.Interface(arg{{ .Name }})
@@ -63,10 +63,11 @@ if err != nil {
 	return err
 }
 {{ else }}
-arg{{.Name}}, err := dec.{{ .SerializerType }}()
+arg{{ .Name }}Uncasted, err := dec.{{ .SerializerType }}()
 if err != nil {
 	return err
 }
+arg{{ .Name }} := {{ .BasicTypeName }}(arg{{ .Name }}Uncasted)
 {{ end }}
 {{- end -}}
 
@@ -75,7 +76,7 @@ if err != nil {
 out{{ $index }},
 {{- end -}} err :=
 {{- end -}}
-s.impl.{{ .Name }}(ctx,
+__s.impl.{{ .Name }}(ctx,
 {{- range (slice .Parameters 1) -}}
 {{ if .IsObserver }}
 arg{{ .Name }},
@@ -105,13 +106,13 @@ if err := respSerializer.Interface(out{{ $index }}); err != nil {
     return err
 }
 {{ else if eq .SerializerType "Text" }}
-if text, err := out{{ $index }}.MarshalText(); err != nil {
+if text, err := out{{ $index }}.{{- if .IsObserver -}}GetIdentity().{{- end -}}MarshalText(); err != nil {
     return err
 } else {
 respSerializer.String(string(text))
 }
 {{ else }}
-respSerializer.{{ .SerializerType }}(out{{ $index }})
+respSerializer.{{ .SerializerType }}({{.BasicSerializeTypeName}}(out{{ $index }}))
 {{ end }}
 {{ end }}
 return nil
@@ -124,10 +125,10 @@ type _{{ .Name }}Activation struct {
 	impl       {{ qualifiedGrainType . }}
 }
 
-func (s *_{{ .Name }}Activation) _{{ .Name }}Activation() {}
+func (__s *_{{ .Name }}Activation) _{{ .Name }}Activation() {}
 
-func (s *_{{ .Name }}Activation) InvokeMethod(ctx context.Context, method string, sender grain.Identity,
-	d grain.Deserializer, respSerializer grain.Serializer) error {
+func (__s *_{{ .Name }}Activation) InvokeMethod(ctx context.Context, method string, sender grain.Identity,
+	dec grain.Deserializer, respSerializer grain.Serializer) error {
 	switch method {
     {{ range .Methods }}
     case "{{ .Name }}":
@@ -148,7 +149,7 @@ type _{{ $grainType }}Client struct {
 }
 
 func {{ $grainType }}Ref(siloClient grain.SiloClient, id string) {{ qualifiedGrainType . }} {
-	return _{{ $grainType }}Client {
+	return &_{{ $grainType }}Client {
 		siloClient: siloClient,
 		Identity: grain.Identity{
 			GrainType: "{{ $grainType }}",
@@ -158,7 +159,7 @@ func {{ $grainType }}Ref(siloClient grain.SiloClient, id string) {{ qualifiedGra
 }
 
 {{ range .Methods }}
-func (c *_{{ $grainType }}Client) {{ .Name }}(ctx,
+func (__c *_{{ $grainType }}Client) {{ .Name }}(ctx context.Context,
 	{{- range (slice .Parameters 1) -}}{{- .Name }} {{if .IsPointer -}}*{{- end -}}{{ qualifiedArgType . -}},{{- end -}})
 	{{- if not (isOneWay .) -}}
 		({{- range (stripLastParam .Returns) -}}
@@ -166,24 +167,24 @@ func (c *_{{ $grainType }}Client) {{ .Name }}(ctx,
 		{{- end -}} error)
 	{{- end -}} {
 	{{ if isOneWay . }}
-	c.siloClient.InvokeOneWayMethod
+	__c.siloClient.InvokeOneWayMethod(ctx, []grain.Identity{__c.Identity},
 	{{- else -}}
-	f := c.siloClient.InvokeMethodV2
+	f := __c.siloClient.InvokeMethodV2(ctx, __c.Identity, 
 	{{- end -}}
-	(ctx, c.Identity, "{{ $grainType }}", "{{ .Name }}", func(respSerializer grain.Serializer) error {
+	"{{ $grainType }}", "{{ .Name }}", func(respSerializer grain.Serializer) error {
 		{{- range (slice .Parameters 1) }}
 			{{ if eq .SerializerType "Interface" }}
 			if err := respSerializer.Interface({{ .Name }}); err != nil {
 				return err
 			}
 			{{ else if eq .SerializerType "Text" }}
-			if text, err := {{ .Name }}.MarshalText(); err != nil {
+			if text, err := {{ .Name }}.{{- if .IsObserver -}}GetIdentity().{{- end -}}MarshalText(); err != nil {
 				return err
 			} else {
 				respSerializer.String(string(text))
 			}
 			{{ else }}
-			respSerializer.{{ .SerializerType }}({{ .Name }})
+			respSerializer.{{ .SerializerType }}({{.BasicSerializeTypeName}}({{ .Name }}))
 			{{ end }}
 		{{- end }}
 		return nil
@@ -199,7 +200,7 @@ func (c *_{{ $grainType }}Client) {{ .Name }}(ctx,
 		{{- end }} err
 	}
 
-	err = resp.Get(func(d grain.Deserializer) error {
+	err = resp.Get(func(dec grain.Deserializer) error {
 	var err error
 	{{ range $index,$element := stripLastParam .Returns -}}
 		{{ if .IsObserver }}
@@ -215,13 +216,17 @@ func (c *_{{ $grainType }}Client) {{ .Name }}(ctx,
 
 			out{{ $index }} = {{ qualifiedArgType . }}Ref(s.siloClient, arg{{.Name}}Identity)
 		{{ else if eq .SerializerType "Interface" }}
+		{{ if .IsPointer }}
 		out{{ $index }} = new({{qualifiedArgType .}})
+		{{ end }}
 		err = dec.Interface(out{{ $index }})
 		if err != nil {
 			return err
 		}
 		{{ else if eq .SerializerType "Text" }}
+		{{ if .IsPointer }}
 		out{{ $index }} = new({{qualifiedArgType .}})
+		{{ end }}
 		out{{ $index }}Str, err := dec.String()
 		if err != nil {
 			return err
@@ -231,10 +236,11 @@ func (c *_{{ $grainType }}Client) {{ .Name }}(ctx,
 			return err
 		}
 		{{ else }}
-		out{{ $index }}, err = dec.{{ .SerializerType }}()
+		out{{ $index }}Uncasted, err := dec.{{ .SerializerType }}()
 		if err != nil {
 			return err
 		}
+		out{{ $index }} = {{ .BasicTypeName }}(out{{ $index }}Uncasted)
 		{{ end }}
 	{{ end }}
 		return err
@@ -244,6 +250,7 @@ func (c *_{{ $grainType }}Client) {{ .Name }}(ctx,
 		{{ if .IsPointer }}nil{{ else }}out{{ $index }}{{ end }},
 		{{- end }} err
 	}
+	return {{ range $index,$element := stripLastParam .Returns -}}out{{ $index }},{{- end }} err
 	{{ end }}
 }
 {{ end }}

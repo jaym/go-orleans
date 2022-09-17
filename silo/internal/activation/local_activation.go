@@ -25,21 +25,9 @@ type grainActivationMessageType int
 
 const (
 	invokeMethodV2 grainActivationMessageType = iota + 1
-	// invokeMethod grainActivationMessageType = iota + 1
-	registerObserver
-	unsubscribeObserver
-	notifyObserver
-	triggerTimer
 	invokeOneWayMethod
+	triggerTimer
 )
-
-type grainActivationInvokeMethod struct {
-	Sender      grain.Identity
-	Method      string
-	Payload     []byte
-	Deadline    time.Time
-	ResolveFunc func(out interface{}, err error)
-}
 
 type grainActivationInvokeMethodV2 struct {
 	Sender      grain.Identity
@@ -57,22 +45,6 @@ type grainActivationInvokeOneWayMethod struct {
 	Deadline time.Time
 }
 
-type grainActivationRegisterObserver struct {
-	Observer            grain.Identity
-	Name                string
-	Payload             []byte
-	RegistrationTimeout time.Duration
-	Deadline            time.Time
-	ResolveFunc         func(err error)
-}
-
-type grainActivationUnsubscribeObserver struct {
-	Observer    grain.Identity
-	Name        string
-	Deadline    time.Time
-	ResolveFunc func(err error)
-}
-
 type grainActivationTriggerTimer struct {
 	Name string
 }
@@ -86,14 +58,10 @@ type grainActivationNotifyObserver struct {
 }
 
 type grainActivationMessage struct {
-	messageType grainActivationMessageType
-	// invokeMethod        *grainActivationInvokeMethod
-	registerObserver    *grainActivationRegisterObserver
-	unsubscribeObserver *grainActivationUnsubscribeObserver
-	notifyObserver      *grainActivationNotifyObserver
-	triggerTimer        *grainActivationTriggerTimer
-	invokeMethodV2      *grainActivationInvokeMethodV2
-	invokeOneWayMethod  *grainActivationInvokeOneWayMethod
+	messageType        grainActivationMessageType
+	triggerTimer       *grainActivationTriggerTimer
+	invokeMethodV2     *grainActivationInvokeMethodV2
+	invokeOneWayMethod *grainActivationInvokeOneWayMethod
 }
 
 type grainActivationEvict struct {
@@ -158,9 +126,7 @@ func (m *LocalGrainActivator) ActivateGrainWithDefaultActivator(identity grain.I
 }
 
 func (m *LocalGrainActivator) ActivateGenericGrain(g *generic.Grain) (*LocalGrainActivation, error) {
-	// grainDesc := &generic.Descriptor
-	// return m.activateGrain(g.Identity, grainDesc, g)
-	return nil, errors.New("unimplemented")
+	return m.activateGrain(g.GetIdentity(), g.Activate)
 }
 
 func (m *LocalGrainActivator) activateGrain(identity grain.Identity, activatorFunc descriptor.ActivatorFunc) (*LocalGrainActivation, error) {
@@ -176,34 +142,6 @@ func (m *LocalGrainActivator) activateGrain(identity grain.Identity, activatorFu
 	l.start()
 	return l, nil
 }
-
-// func (g *LocalGrainActivation) findMethodDesc(name string) (*descriptor.MethodDesc, error) {
-// 	for i := range g.description.Methods {
-// 		if g.description.Methods[i].Name == name {
-// 			return &g.description.Methods[i], nil
-// 		}
-// 	}
-// 	return nil, ErrGrainMethodNotFound
-// }
-
-// func (g *LocalGrainActivation) findObserableDesc(grainType, name string) (*descriptor.ObservableDesc, error) {
-// 	var desc *descriptor.GrainDescription
-// 	if grainType == "" {
-// 		desc = g.description
-// 	} else {
-// 		var err error
-// 		desc, _, err = g.grainActivator.registrar.Lookup(grainType)
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 	}
-// 	for i := range desc.Observables {
-// 		if desc.Observables[i].Name == name {
-// 			return &desc.Observables[i], nil
-// 		}
-// 	}
-// 	return nil, ErrGrainObservableNotFound
-// }
 
 func (l *LocalGrainActivation) start() {
 	ctx := gcontext.WithIdentityContext(context.Background(), l.identity)
@@ -312,7 +250,7 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 		}
 		defer cancel()
 
-		err := activation.InvokeMethod(ctx, req.Method, req.Dec, req.Ser)
+		err := activation.InvokeMethod(ctx, req.Method, req.Sender, req.Dec, req.Ser)
 
 		req.ResolveFunc(err)
 	case invokeOneWayMethod:
@@ -326,8 +264,10 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 		}
 		defer cancel()
 
-		err := activation.InvokeMethod(ctx, req.Method, req.Dec, nil)
-		l.log.Error(err, "failed to invoke one way method", "identity", l.identity, "method", req.Method)
+		err := activation.InvokeMethod(ctx, req.Method, req.Sender, req.Dec, nil)
+		if err != nil {
+			l.log.Error(err, "failed to invoke one way method", "identity", l.identity, "method", req.Method)
+		}
 	case triggerTimer:
 		req := msg.triggerTimer
 		ctx, cancel := context.WithTimeout(ctx, defaultGrainTimerTriggerTimeout)
@@ -377,42 +317,6 @@ func (l *LocalGrainActivation) InvokeOneWayMethod(sender grain.Identity, method 
 			Method:   method,
 			Dec:      dec,
 			Deadline: deadline,
-		},
-	})
-}
-
-func (l *LocalGrainActivation) RegisterObserver(observer grain.Identity, observableName string, payload []byte, registrationTimeout time.Duration, resolve func(err error)) error {
-	return l.pushInbox(grainActivationMessage{
-		messageType: registerObserver,
-		registerObserver: &grainActivationRegisterObserver{
-			Observer:            observer,
-			Name:                observableName,
-			ResolveFunc:         resolve,
-			RegistrationTimeout: registrationTimeout,
-			Payload:             payload,
-		},
-	})
-}
-
-func (l *LocalGrainActivation) UnsubscribeObserver(observer grain.Identity, observableName string, resolve func(err error)) error {
-	return l.pushInbox(grainActivationMessage{
-		messageType: unsubscribeObserver,
-		unsubscribeObserver: &grainActivationUnsubscribeObserver{
-			Observer:    observer,
-			Name:        observableName,
-			ResolveFunc: resolve,
-		},
-	})
-}
-
-func (l *LocalGrainActivation) NotifyObservable(observable grain.Identity, observableType string, name string, payload []byte) error {
-	return l.pushInbox(grainActivationMessage{
-		messageType: notifyObserver,
-		notifyObserver: &grainActivationNotifyObserver{
-			Sender:         observable,
-			ObservableType: observableType,
-			Name:           name,
-			Payload:        payload,
 		},
 	})
 }

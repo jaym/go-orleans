@@ -1,20 +1,12 @@
 package services
 
 import (
-	"context"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/jaym/go-orleans/grain"
 )
-
-type GrainObserverManager interface {
-	List(ctx context.Context, observableName string) ([]grain.RegisteredObserver, error)
-	Add(ctx context.Context, observableName string, identity grain.Identity, registrationTimeout time.Duration, val proto.Message) (grain.RegisteredObserver, error)
-	Remove(ctx context.Context, observableName string, identity grain.Identity) error
-	Notify(ctx context.Context, observableName string, observers []grain.RegisteredObserver, val proto.Message) error
-}
 
 type RegisteredObserver[T any] interface {
 	grain.GrainReference
@@ -88,43 +80,5 @@ func (m *InMemoryGrainObserverManager[T, N]) RemoveExpired() []RegisteredObserve
 			delete(m.registeredObservers, ident)
 		}
 	}
-	return expired
-}
-
-func (m *InMemoryGrainObserverManager[T, N]) Notify(ctx context.Context, siloClient grain.SiloClient, val N, filter func(T) bool) []RegisteredObserver[T] {
-	expired := []RegisteredObserver[T]{}
-	toNotify := make([]grain.Identity, 0, len(m.registeredObservers))
-	now := m.nowProvider()
-
-	for ident, or := range m.registeredObservers {
-		if or.ExpiresAt().Before(now) {
-			expired = append(expired, or)
-			delete(m.registeredObservers, ident)
-		} else if filter(or.val) {
-			toNotify = append(toNotify, or.GetIdentity())
-		}
-	}
-
-	siloClient.NotifyObservers(ctx, m.grainType, m.observableName, toNotify, val)
-
-	return expired
-}
-
-func (m *InMemoryGrainObserverManager[T, N]) NotifyAll(ctx context.Context, siloClient grain.SiloClient, val N) []RegisteredObserver[T] {
-	expired := []RegisteredObserver[T]{}
-	toNotify := make([]grain.Identity, 0, len(m.registeredObservers))
-	now := m.nowProvider()
-
-	for ident, or := range m.registeredObservers {
-		if or.ExpiresAt().Before(now) {
-			expired = append(expired, or)
-			delete(m.registeredObservers, ident)
-		} else {
-			toNotify = append(toNotify, or.GetIdentity())
-		}
-	}
-
-	siloClient.NotifyObservers(ctx, m.grainType, m.observableName, toNotify, val)
-
 	return expired
 }

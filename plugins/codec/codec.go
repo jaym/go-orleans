@@ -13,11 +13,6 @@ import (
 var ErrUnexpectedType = errors.New("unexpected type")
 var ErrValuesConsumed = errors.New("no more values to consume")
 
-type Codec interface {
-	Encode(interface{}) ([]byte, error)
-	Decode([]byte, interface{}) error
-}
-
 type CodecV2 interface {
 	Pack() FrameSerializer
 	Unpack([]byte) (FrameDeserializer, error)
