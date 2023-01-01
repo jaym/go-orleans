@@ -121,7 +121,10 @@ func (m *GrainActivationManagerImpl) EnqueueInvokeOneWayMethodRequest(sender gra
 			continue
 		}
 		// TODO:  deadline
-		activation.InvokeOneWayMethod(sender, methodName, time.Now().Add(time.Minute), dec)
+		if err := activation.InvokeOneWayMethod(sender, methodName, time.Now().Add(time.Minute), dec.CloneAndReset()); err != nil {
+			m.log.V(0).Error(err, "failed invoke one way method", "method", methodName,
+				"receiver", receiver.String())
+		}
 	}
 
 	return nil

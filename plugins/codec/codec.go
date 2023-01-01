@@ -59,6 +59,13 @@ func (d *frameDeserializer) inc() {
 	d.currentIdx++
 }
 
+func (d *frameDeserializer) CloneAndReset() grain.Deserializer {
+	return &frameDeserializer{
+		values:     d.values,
+		currentIdx: 0,
+	}
+}
+
 func (d *frameDeserializer) Int64() (int64, error) {
 	if d.currentIdx >= len(d.values) {
 		return 0, ErrValuesConsumed

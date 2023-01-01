@@ -20,6 +20,7 @@ type SiloClient interface {
 }
 
 type Deserializer interface {
+	CloneAndReset() Deserializer
 	Int64() (int64, error)
 	Bool() (bool, error)
 	String() (string, error)
