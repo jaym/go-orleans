@@ -3,7 +3,6 @@ package main
 import (
 	"embed"
 	"errors"
-	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -315,6 +314,26 @@ func (p *GoorParameter) IsContext() bool {
 	return p.l.isContext(p.Type)
 }
 
+func (p *GoorParameter) Import() (GoorImport, bool) {
+	var named *types.Named
+	var ok bool
+	switch v := p.Type.(type) {
+	case *types.Named:
+		named = v
+		ok = true
+	case *types.Pointer:
+		named, ok = v.Elem().(*types.Named)
+	}
+	if !ok {
+		return GoorImport{}, false
+	}
+	pkg := named.Obj().Pkg()
+	return GoorImport{
+		PackagePath: pkg.Path(),
+		Name:        pkg.Name(),
+	}, true
+}
+
 func (p *GoorParameter) validate() error {
 	return nil
 }
@@ -491,28 +510,56 @@ func main() {
 		panic(err)
 	}
 
-	// "github.com/jaym/go-orleans-chat-example/gen"
-	// __grain "github.com/jaym/go-orleans/grain"
-	// __generic "github.com/jaym/go-orleans/grain/generic"
-	// __descriptor "github.com/jaym/go-orleans/grain/descriptor"
-	// "github.com/jaym/go-orleans/grain/services"
+	if len(grainDefs)+len(observerDefs) == 0 {
+		os.Exit(0)
+	}
 
-	imports := map[string]GoorImports{
+	imports := map[string]GoorImport{
 		"github.com/jaym/go-orleans/grain": {
 			PackagePath: "github.com/jaym/go-orleans/grain",
 			Name:        "__grain",
 		},
-		"github.com/jaym/go-orleans/grain/generic": {
-			PackagePath: "github.com/jaym/go-orleans/grain/generic",
-			Name:        "__generic",
-		},
-		"github.com/jaym/go-orleans/grain/descriptor": {
-			PackagePath: "github.com/jaym/go-orleans/grain/descriptor",
-			Name:        "__descriptor",
+		"github.com/jaym/go-orleans/grain/services": {
+			PackagePath: "github.com/jaym/go-orleans/grain/services",
+			Name:        "__services",
 		},
 	}
 
+	if len(grainDefs) > 0 {
+		imports["github.com/jaym/go-orleans/grain/descriptor"] = GoorImport{
+			PackagePath: "github.com/jaym/go-orleans/grain/descriptor",
+			Name:        "__descriptor",
+		}
+	}
+
+	if len(observerDefs) > 0 {
+		imports["github.com/jaym/go-orleans/grain/generic"] = GoorImport{
+			PackagePath: "github.com/jaym/go-orleans/grain/generic",
+			Name:        "__generic",
+		}
+	}
+
 	outputPkgPath := l.pkg.PkgPath
+
+	for _, defs := range [][]*GoorObjectDefinition{grainDefs, observerDefs} {
+		for _, def := range defs {
+			for _, gm := range def.Methods {
+				for _, gp := range gm.Parameters {
+					i, ok := gp.Import()
+					if ok {
+						if i.PackagePath == "context" || i.PackagePath == outputPkgPath {
+							continue
+						}
+						if _, ok := imports[i.PackagePath]; !ok {
+							i.IsUserImport = true
+							imports[i.PackagePath] = i
+						}
+					}
+				}
+			}
+		}
+	}
+
 	t, err := template.New("").Funcs(template.FuncMap{
 		"qualifiedGrainType": func(gd GoorDefNamed) string {
 			return gd.GetName()
@@ -548,7 +595,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Fprintln(os.Stdout, header)
+	err = t.ExecuteTemplate(os.Stdout, "header.tpl", GoorGoFile{
+		PackageName: l.pkg.Name,
+		Imports:     imports,
+	})
+	if err != nil {
+		panic(err)
+	}
 	for _, grainDef := range grainDefs {
 		err = t.ExecuteTemplate(os.Stdout, "Grain", grainDef)
 		if err != nil {
@@ -563,21 +616,13 @@ func main() {
 	}
 }
 
-type GoorImports struct {
-	PackagePath string
-	Name        string
+type GoorGoFile struct {
+	PackageName string
+	Imports     map[string]GoorImport
 }
 
-var header = `package gengo
-
-import (
-	"context"
-	"errors"
-
-	"github.com/jaym/go-orleans-chat-example/gen"
-	__grain "github.com/jaym/go-orleans/grain"
-	__generic "github.com/jaym/go-orleans/grain/generic"
-	__descriptor "github.com/jaym/go-orleans/grain/descriptor"
-	__services "github.com/jaym/go-orleans/grain/services"
-)
-`
+type GoorImport struct {
+	PackagePath  string
+	Name         string
+	IsUserImport bool
+}
