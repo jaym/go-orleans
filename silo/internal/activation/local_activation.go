@@ -161,6 +161,7 @@ func (l *LocalGrainActivation) loop(ctx context.Context) {
 		timerService:  l.grainActivator.timerService,
 		timers:        map[string]timerInfo{},
 	}
+	defer l.grainTimerService.Destroy()
 
 	coreServices := &coreGrainService{
 		grainTimerServices: l.grainTimerService,

@@ -28,14 +28,23 @@ const (
 
 	registrationRefreshInterval = time.Minute
 	registrationTimeout         = 3 * registrationRefreshInterval
+
+	refreshObservablesTickerName = "__refresh-observables"
 )
 
+type ObservableGrain interface {
+	grain.GrainReference
+	UnregisterObserver(context.Context, grain.ObserverRegistrationToken)
+	RefreshObserver(context.Context, grain.ObserverRegistrationToken) (grain.ObserverRegistrationToken, error)
+}
+
 type observable struct {
-	ident grain.Identity
+	id    string
+	ref   ObservableGrain
 	token grain.ObserverRegistrationToken
 }
 
-type InvokeMethodFunc func(ctx context.Context, method string, sender grain.Identity,
+type InvokeMethodFunc func(ctx context.Context, client grain.SiloClient, method string, sender grain.Identity,
 	d grain.Deserializer, respSerializer grain.Serializer) error
 
 type Grain struct {
@@ -44,18 +53,41 @@ type Grain struct {
 	client grain.SiloClient
 	lock   sync.RWMutex
 
-	methods map[string]InvokeMethodFunc
+	methods     map[string]InvokeMethodFunc
+	observables map[string]observable
 }
 
 func NewGrain(location string, client grain.SiloClient) *Grain {
 	return &Grain{
-		Identity: Identity(location),
-		client:   client,
-		methods:  map[string]InvokeMethodFunc{},
+		Identity:    Identity(location),
+		client:      client,
+		methods:     map[string]InvokeMethodFunc{},
+		observables: map[string]observable{},
 	}
 }
 
 func (s *Grain) Activate(ctx context.Context, identity grain.Identity, services services.CoreGrainServices) (grain.Activation, error) {
+	err := services.TimerService().RegisterTicker(refreshObservablesTickerName, 10*time.Second, func(ctx context.Context) {
+		s.lock.Lock()
+		defer s.lock.Unlock()
+		fmt.Println("Refreshing observables")
+		for k, o := range s.observables {
+			t, err := o.ref.RefreshObserver(ctx, o.token)
+			if err != nil {
+				fmt.Printf("an error happened in refreshing observables: %v\n", err)
+				continue
+			}
+			s.observables[k] = observable{
+				id:    k,
+				ref:   o.ref,
+				token: t,
+			}
+		}
+
+	})
+	if err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -65,7 +97,7 @@ func (s *Grain) InvokeMethod(ctx context.Context, methodName string, sender grai
 	defer s.lock.RUnlock()
 
 	if m, ok := s.methods[methodName]; ok {
-		return m(ctx, methodName, sender, d, respSerializer)
+		return m(ctx, s.client, methodName, sender, d, respSerializer)
 	}
 
 	return errors.New("unknown method")
@@ -80,6 +112,17 @@ func (s *Grain) OnMethod(methodName string, f InvokeMethodFunc) error {
 	s.methods[methodName] = f
 
 	return nil
+}
+
+func (s *Grain) RegisterObservable(ref ObservableGrain, token grain.ObserverRegistrationToken) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	id := ksuid.New().String()
+	s.observables[id] = observable{
+		id:    id,
+		ref:   ref,
+		token: token,
+	}
 }
 
 func Identity(location string) grain.Identity {

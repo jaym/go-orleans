@@ -378,6 +378,19 @@ func (def *GoorGrainDefinition) validate() error {
 	return nil
 }
 
+func (def *GoorGrainDefinition) GetName() string {
+	return def.Name
+}
+
+type GoorObserverDefinition struct {
+	Name    string
+	Methods []*GoorMethod
+}
+
+func (def *GoorObserverDefinition) GetName() string {
+	return def.Name
+}
+
 func (l *Loader) createGrainDef(pkg *packages.Package, gi *ast.TypeSpec, observableGrainDef *GoorGrainDefinition, isObservable bool) (*GoorGrainDefinition, error) {
 	methods, err := l.createMethods(pkg, gi.Type.(*ast.InterfaceType))
 	if err != nil {
@@ -400,14 +413,34 @@ func (l *Loader) createGrainDef(pkg *packages.Package, gi *ast.TypeSpec, observa
 	return gd, nil
 }
 
-func (l *Loader) Load() ([]*GoorGrainDefinition, error) {
+func (l *Loader) createObserverDef(pkg *packages.Package, gi *ast.TypeSpec) (*GoorObserverDefinition, error) {
+	methods, err := l.createMethods(pkg, gi.Type.(*ast.InterfaceType))
+	if err != nil {
+		return nil, err
+	}
+
+	for _, gm := range methods {
+		if !gm.IsOneWay() {
+			return nil, errors.New("observer interfaces only support one way methods")
+		}
+	}
+
+	od := &GoorObserverDefinition{
+		Name:    gi.Name.Name,
+		Methods: methods,
+	}
+
+	return od, nil
+}
+
+func (l *Loader) Load() ([]*GoorGrainDefinition, []*GoorObserverDefinition, error) {
 	grainDefs := []*GoorGrainDefinition{}
 
 	grainInterfaces := l.findGoorInterfaces(l.pkg, "Grain")
 	for _, gi := range grainInterfaces {
 		gd, err := l.createGrainDef(l.pkg, gi, nil, false)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		grainDefs = append(grainDefs, gd)
@@ -420,20 +453,34 @@ func (l *Loader) Load() ([]*GoorGrainDefinition, error) {
 	observableGrain := observableGrains[0]
 	observableGrainDef, err := l.createGrainDef(l.goorGenPkg, observableGrain, nil, false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	grainInterfaces = l.findGoorInterfaces(l.pkg, "ObservableGrain")
 	for _, gi := range grainInterfaces {
 		gd, err := l.createGrainDef(l.pkg, gi, observableGrainDef, true)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		grainDefs = append(grainDefs, gd)
 	}
 
-	return grainDefs, nil
+	observerDefs := []*GoorObserverDefinition{}
+	observerInterfaces := l.findGoorInterfaces(l.pkg, "Observer")
+	for _, oi := range observerInterfaces {
+		od, err := l.createObserverDef(l.pkg, oi)
+		if err != nil {
+			return nil, nil, err
+		}
+		observerDefs = append(observerDefs, od)
+	}
+
+	return grainDefs, observerDefs, nil
+}
+
+type GoorDefNamed interface {
+	GetName() string
 }
 
 func main() {
@@ -441,15 +488,36 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	grainDefs, err := l.Load()
+	grainDefs, observerDefs, err := l.Load()
 	if err != nil {
 		panic(err)
 	}
 
+	// "github.com/jaym/go-orleans-chat-example/gen"
+	// __grain "github.com/jaym/go-orleans/grain"
+	// __generic "github.com/jaym/go-orleans/grain/generic"
+	// __descriptor "github.com/jaym/go-orleans/grain/descriptor"
+	// "github.com/jaym/go-orleans/grain/services"
+
+	imports := map[string]GoorImports{
+		"github.com/jaym/go-orleans/grain": {
+			PackagePath: "github.com/jaym/go-orleans/grain",
+			Name:        "__grain",
+		},
+		"github.com/jaym/go-orleans/grain/generic": {
+			PackagePath: "github.com/jaym/go-orleans/grain/generic",
+			Name:        "__generic",
+		},
+		"github.com/jaym/go-orleans/grain/descriptor": {
+			PackagePath: "github.com/jaym/go-orleans/grain/descriptor",
+			Name:        "__descriptor",
+		},
+	}
+
 	outputPkgPath := l.pkg.PkgPath
 	t, err := template.New("").Funcs(template.FuncMap{
-		"qualifiedGrainType": func(gd *GoorGrainDefinition) string {
-			return gd.Name
+		"qualifiedGrainType": func(gd GoorDefNamed) string {
+			return gd.GetName()
 		},
 		"qualifiedArgType": func(p *GoorParameter) string {
 			t := p.Type
@@ -463,6 +531,10 @@ func main() {
 				if outputPkgPath == tt.Obj().Pkg().Path() {
 					return tt.Obj().Name()
 				} else {
+					if i, ok := imports[tt.Obj().Pkg().Path()]; ok {
+						return i.Name + "." + tt.Obj().Name()
+
+					}
 					return tt.Obj().Pkg().Name() + "." + tt.Obj().Name()
 				}
 			}
@@ -485,6 +557,17 @@ func main() {
 			panic(err)
 		}
 	}
+	for _, od := range observerDefs {
+		err = t.ExecuteTemplate(os.Stdout, "Observer", od)
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
+type GoorImports struct {
+	PackagePath string
+	Name        string
 }
 
 var header = `package gengo
@@ -494,8 +577,9 @@ import (
 	"errors"
 
 	"github.com/jaym/go-orleans-chat-example/gen"
-	"github.com/jaym/go-orleans/grain"
-	"github.com/jaym/go-orleans/grain/descriptor"
-	"github.com/jaym/go-orleans/grain/services"
+	__grain "github.com/jaym/go-orleans/grain"
+	__generic "github.com/jaym/go-orleans/grain/generic"
+	__descriptor "github.com/jaym/go-orleans/grain/descriptor"
+	__services "github.com/jaym/go-orleans/grain/services"
 )
 `

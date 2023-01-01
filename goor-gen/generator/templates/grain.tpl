@@ -1,11 +1,11 @@
 {{ define "GrainActivator" }}
 
 type {{ .Name }}Activation interface {
-	grain.Activation
+	__grain.Activation
 	_{{ .Name }}Activation()
 }
 
-func New{{ .Name }}Activation(siloClient grain.SiloClient, impl {{ qualifiedGrainType . }}) {{ .Name }}Activation {
+func New{{ .Name }}Activation(siloClient __grain.SiloClient, impl {{ qualifiedGrainType . }}) {{ .Name }}Activation {
 	return &_{{ .Name }}Activation{
 		siloClient: siloClient,
 		impl:       impl,
@@ -13,14 +13,14 @@ func New{{ .Name }}Activation(siloClient grain.SiloClient, impl {{ qualifiedGrai
 }
 
 type {{ .Name }}RoomGrainActivator interface {
-	Activate(ctx context.Context, identity grain.Identity, services services.CoreGrainServices) ({{ qualifiedGrainType . }}, error)
+	Activate(ctx context.Context, identity __grain.Identity, services __services.CoreGrainServices) ({{ qualifiedGrainType . }}, error)
 }
 
-func Register{{ .Name }}Activator(registrar descriptor.Registrar, activator {{ .Name }}Activator) {
+func Register{{ .Name }}Activator(registrar __descriptor.Registrar, activator {{ .Name }}Activator) {
 	registrar.RegisterV2(
 		"{{ .Name }}",
-		func(ctx context.Context, identity grain.Identity,
-			services services.CoreGrainServices) (grain.Activation, error) {
+		func(ctx context.Context, identity __grain.Identity,
+			services __services.CoreGrainServices) (__grain.Activation, error) {
 			a, err := activator.Activate(ctx, identity, services)
 			if err != nil {
 				return nil, err
@@ -33,72 +33,23 @@ func Register{{ .Name }}Activator(registrar descriptor.Registrar, activator {{ .
 
 
 {{ define "grainActivationInvokeMethodCase" }}
-{{- range (slice .Parameters 1) -}}
-{{ if .IsObserver }}
-arg{{.Name}}Str, err := dec.String()
-if err != nil {
-	return err
-}
-arg{{.Name}}Identity := grain.Identity{}
-err = arg{{.Name}}Identity.UnmarshalText([]byte(arg{{.Name}}Str))
-if err != nil {
-	return err
-}
-
-arg{{.Name}} := {{ qualifiedArgType . }}Ref(__s.siloClient, arg{{.Name}}Identity)
-{{ else if eq .SerializerType "Interface" }}
-arg{{ .Name }} := new({{qualifiedArgType .}})
-err = dec.Interface(arg{{ .Name }})
-if err != nil {
-	return err
-}
-{{ else if eq .SerializerType "Text" }}
-arg{{ .Name }} := new({{qualifiedArgType .}})
-arg{{ .Name }}Str, err := dec.String()
-if err != nil {
-	return err
-}
-err = arg{{ .Name }}.UnmarshalText([]byte(arg{{ .Name }}Str))
-if err != nil {
-	return err
-}
-{{ else }}
-arg{{ .Name }}Uncasted, err := dec.{{ .SerializerType }}()
-if err != nil {
-	return err
-}
-arg{{ .Name }} := {{ .BasicTypeName }}(arg{{ .Name }}Uncasted)
-{{ end }}
-{{- end -}}
+{{ template "decodeMethodArgs" . }}
 
 {{ if not (isOneWay .) }}
 {{ range $index, $element := stripLastParam .Returns -}}
 out{{ $index }},
 {{- end -}} err :=
 {{- end -}}
-__s.impl.{{ .Name }}(ctx,
-{{- range (slice .Parameters 1) -}}
-{{ if .IsObserver }}
-arg{{ .Name }},
-{{ else if .IsBasic}}
-{{ if .IsPointer }}
-&arg{{ .Name }},
-{{ else }}
-arg{{ .Name }},
-{{ end }}
-{{ else }}
-{{ if .IsPointer }}
-arg{{ .Name }},
-{{ else }}
-*arg{{ .Name }},
-{{ end }}
-{{ end }}
-{{- end -}})
+
+__s.impl.{{ .Name }}(ctx, {{ template "callArgsWithoutCtx" . }})
 
 {{ if isOneWay . }}
 return nil
 
 {{ else }}
+if err != nil {
+  return err
+}
 
 {{ range $index, $element := stripLastParam .Returns }}
 {{ if eq .SerializerType "Interface" }}
@@ -121,14 +72,17 @@ return nil
 
 {{ define "GrainActivation" }}
 type _{{ .Name }}Activation struct {
-	siloClient grain.SiloClient
+	siloClient __grain.SiloClient
 	impl       {{ qualifiedGrainType . }}
 }
 
 func (__s *_{{ .Name }}Activation) _{{ .Name }}Activation() {}
 
-func (__s *_{{ .Name }}Activation) InvokeMethod(ctx context.Context, method string, sender grain.Identity,
-	dec grain.Deserializer, respSerializer grain.Serializer) error {
+func (__s *_{{ .Name }}Activation) InvokeMethod(ctx context.Context, method string, sender __grain.Identity,
+	dec __grain.Deserializer, respSerializer __grain.Serializer) error {
+	siloClient := __s.siloClient
+	_ = siloClient
+	
 	switch method {
     {{ range .Methods }}
     case "{{ .Name }}":
@@ -139,19 +93,18 @@ func (__s *_{{ .Name }}Activation) InvokeMethod(ctx context.Context, method stri
 }
 {{ end }}
 
-
 {{ define "GrainClient" }}
 {{ $grainType := .Name }}
 
 type _{{ $grainType }}Client struct {
-	grain.Identity
-	siloClient grain.SiloClient
+	__grain.Identity
+	siloClient __grain.SiloClient
 }
 
-func {{ $grainType }}Ref(siloClient grain.SiloClient, id string) {{ qualifiedGrainType . }} {
+func {{ $grainType }}Ref(siloClient __grain.SiloClient, id string) {{ qualifiedGrainType . }} {
 	return &_{{ $grainType }}Client {
 		siloClient: siloClient,
-		Identity: grain.Identity{
+		Identity: __grain.Identity{
 			GrainType: "{{ $grainType }}",
 			ID:        id,
 		},
@@ -159,35 +112,14 @@ func {{ $grainType }}Ref(siloClient grain.SiloClient, id string) {{ qualifiedGra
 }
 
 {{ range .Methods }}
-func (__c *_{{ $grainType }}Client) {{ .Name }}(ctx context.Context,
-	{{- range (slice .Parameters 1) -}}{{- .Name }} {{if .IsPointer -}}*{{- end -}}{{ qualifiedArgType . -}},{{- end -}})
-	{{- if not (isOneWay .) -}}
-		({{- range (stripLastParam .Returns) -}}
-			{{if .IsPointer -}}*{{- end -}}{{- qualifiedArgType . -}},
-		{{- end -}} error)
-	{{- end -}} {
+func (__c *_{{ $grainType }}Client) {{ .Name }}({{ template "methodParameters" . }}) {{ template "methodReturns" . }} {
 	{{ if isOneWay . }}
-	__c.siloClient.InvokeOneWayMethod(ctx, []grain.Identity{__c.Identity},
+	__c.siloClient.InvokeOneWayMethod(ctx, []__grain.Identity{__c.Identity},
 	{{- else -}}
 	f := __c.siloClient.InvokeMethodV2(ctx, __c.Identity, 
 	{{- end -}}
-	"{{ $grainType }}", "{{ .Name }}", func(respSerializer grain.Serializer) error {
-		{{- range (slice .Parameters 1) }}
-			{{ if eq .SerializerType "Interface" }}
-			if err := respSerializer.Interface({{ .Name }}); err != nil {
-				return err
-			}
-			{{ else if eq .SerializerType "Text" }}
-			if text, err := {{ .Name }}.{{- if .IsObserver -}}GetIdentity().{{- end -}}MarshalText(); err != nil {
-				return err
-			} else {
-				respSerializer.String(string(text))
-			}
-			{{ else }}
-			respSerializer.{{ .SerializerType }}({{.BasicSerializeTypeName}}({{ .Name }}))
-			{{ end }}
-		{{- end }}
-		return nil
+	"{{ $grainType }}", "{{ .Name }}", func(respSerializer __grain.Serializer) error {
+		{{ template "serializerFuncBody" . }}
 	})
 	{{ if not (isOneWay .) }}
 	{{ range $index,$element := stripLastParam .Returns }}
@@ -200,7 +132,7 @@ func (__c *_{{ $grainType }}Client) {{ .Name }}(ctx context.Context,
 		{{- end }} err
 	}
 
-	err = resp.Get(func(dec grain.Deserializer) error {
+	err = resp.Get(func(dec __grain.Deserializer) error {
 	var err error
 	{{ range $index,$element := stripLastParam .Returns -}}
 		{{ if .IsObserver }}
@@ -208,7 +140,7 @@ func (__c *_{{ $grainType }}Client) {{ .Name }}(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			out{{ $index }}Identity := grain.Identity{}
+			out{{ $index }}Identity := __grain.Identity{}
 			err = out{{ $index }}Identity.UnmarshalText([]byte(out{{ $index }}Str))
 			if err != nil {
 				return err
