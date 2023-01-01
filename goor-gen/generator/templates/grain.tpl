@@ -12,7 +12,7 @@ func New{{ .Name }}Activation(siloClient __grain.SiloClient, impl {{ qualifiedGr
 	}
 }
 
-type {{ .Name }}RoomGrainActivator interface {
+type {{ .Name }}Activator interface {
 	Activate(ctx context.Context, identity __grain.Identity, services __services.CoreGrainServices) ({{ qualifiedGrainType . }}, error)
 }
 
