@@ -143,6 +143,7 @@ func (__c *_{{ $grainType }}Client) {{ .Name }}({{ template "methodParameters" .
 
 	err = resp.Get(func(dec __grain.Deserializer) error {
 	var err error
+	_ = err
 	{{ range $index,$element := stripLastParam .Returns -}}
 		{{ if .IsObserver }}
 			out{{ $index }}Str, err := dec.String()

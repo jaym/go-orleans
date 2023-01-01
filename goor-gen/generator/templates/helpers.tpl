@@ -53,8 +53,8 @@ if err != nil {
 arg{{.Name}} := {{ qualifiedArgType . }}RefFromIdentity(siloClient, arg{{.Name}}Identity)
 {{ else if eq .SerializerType "Interface" }}
 arg{{ .Name }} := new({{qualifiedArgType .}})
-err = dec.Interface(arg{{ .Name }})
-if err != nil {
+
+if err := dec.Interface(arg{{ .Name }}); err != nil {
 	return err
 }
 {{ else if eq .SerializerType "Text" }}

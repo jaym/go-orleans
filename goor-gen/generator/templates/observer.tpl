@@ -48,6 +48,7 @@ func (__b *Generic{{ $observerType }}Builder) Build(g *__generic.Grain) ({{ $obs
 		"{{ .Name }}",
 		func(ctx context.Context, siloClient __grain.SiloClient, method string, sender __grain.Identity, dec __grain.Deserializer, respSerializer __grain.Serializer) error {
 			var err error
+			_ = err
 			{{template "decodeMethodArgs" . }}
 			__b.on{{ .Name }}(ctx, sender, {{ template "callArgsWithoutCtx" . }})
 			return nil
