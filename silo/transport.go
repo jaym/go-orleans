@@ -46,7 +46,7 @@ func (s siloTransportHandler) ReceiveInvokeMethodRequest(ctx context.Context, se
 	}
 }
 
-func (s siloTransportHandler) ReceiveInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity, receivers []grain.Identity, grainType string, methodName string, payload []byte) {
+func (s siloTransportHandler) ReceiveInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity, receivers []grain.Identity, methodName string, payload []byte) {
 	dec, err := s.codecV2.Unpack(payload)
 	if err != nil {
 		s.log.Error(err, "failed to enqueue one way method request", "sender", sender, "receivers", receivers, "name", methodName)
@@ -84,8 +84,8 @@ func (t *localTransport) EnqueueInvokeMethodRequest(ctx context.Context, sender 
 	return nil
 }
 
-func (t *localTransport) EnqueueInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity, receivers []grain.Identity, grainType string, name string, payload []byte) error {
-	t.h.ReceiveInvokeOneWayMethodRequest(ctx, sender, receivers, grainType, name, payload)
+func (t *localTransport) EnqueueInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity, receivers []grain.Identity, name string, payload []byte) error {
+	t.h.ReceiveInvokeOneWayMethodRequest(ctx, sender, receivers, name, payload)
 	return nil
 }
 

@@ -51,10 +51,10 @@ func (s *siloClientImpl) placeGrain(ctx context.Context, ident grain.Identity) (
 	}, nil
 }
 
-func (s *siloClientImpl) InvokeMethodV2(ctx context.Context, receiver grain.Identity, grainType string, method string,
+func (s *siloClientImpl) InvokeMethodV2(ctx context.Context, receiver grain.Identity, method string,
 	ser func(grain.Serializer) error) grain.InvokeMethodFutureV2 {
 	id := ksuid.New().String()
-	log := s.log.WithValues("uuid", id, "receiver", receiver, "grainType", grainType, "method", method)
+	log := s.log.WithValues("uuid", id, "receiver", receiver, "method", method)
 
 	log.V(4).Info("InvokeMethod")
 
@@ -88,7 +88,7 @@ func (s *siloClientImpl) InvokeMethodV2(ctx context.Context, receiver grain.Iden
 	return newInvokeMethodFutureV2(s.codecV2, f)
 }
 
-func (s *siloClientImpl) InvokeOneWayMethod(ctx context.Context, receivers []grain.Identity, grainType string, method string,
+func (s *siloClientImpl) InvokeOneWayMethod(ctx context.Context, receivers []grain.Identity, method string,
 	ser func(grain.Serializer) error) {
 
 	if len(receivers) == 0 {
@@ -123,7 +123,7 @@ func (s *siloClientImpl) InvokeOneWayMethod(ctx context.Context, receivers []gra
 		}
 		receiverAddrs = append(receiverAddrs, addr)
 	}
-	err = s.transportManager.InvokeMethodOneWay(ctx, *sender, receiverAddrs, grainType, method, data)
+	err = s.transportManager.InvokeMethodOneWay(ctx, *sender, receiverAddrs, method, data)
 	if err != nil {
 		s.log.V(0).Error(err, "failed to invoke one way method")
 		return

@@ -6,7 +6,7 @@ func {{ $grainType }}{{ .Name }}InvokeBatch(ctx context.Context, siloClient __gr
 	for i, o := range observerList {
 		idents[i] = o.GetIdentity()
 	}
-	siloClient.InvokeOneWayMethod(ctx, idents, "{{ $grainType }}", "{{ .Name }}", func(respSerializer __grain.Serializer) error {
+	siloClient.InvokeOneWayMethod(ctx, idents, "{{ .Name }}", func(respSerializer __grain.Serializer) error {
         {{ template "serializerFuncBody" . }}
 	})
 }

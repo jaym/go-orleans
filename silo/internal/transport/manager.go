@@ -38,7 +38,7 @@ func NewManager(log logr.Logger, c clock.Clock, handler TransportHandler) *Manag
 
 type TransportHandler interface {
 	ReceiveInvokeMethodRequest(ctx context.Context, sender grain.Identity, receiver grain.Identity, method string, payload []byte, promise InvokeMethodPromise)
-	ReceiveInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity, receivers []grain.Identity, grainType string, name string, payload []byte)
+	ReceiveInvokeOneWayMethodRequest(ctx context.Context, sender grain.Identity, receivers []grain.Identity, name string, payload []byte)
 }
 
 type managedTransport struct {
@@ -243,7 +243,7 @@ func (m *Manager) InvokeMethod(ctx context.Context, sender grain.Identity, recei
 	return f, nil
 }
 
-func (m *Manager) InvokeMethodOneWay(ctx context.Context, sender grain.Identity, receivers []cluster.GrainAddress, grainType string, name string, payload []byte) error {
+func (m *Manager) InvokeMethodOneWay(ctx context.Context, sender grain.Identity, receivers []cluster.GrainAddress, name string, payload []byte) error {
 	locations := map[cluster.Location][]grain.Identity{}
 	for _, r := range receivers {
 		locations[r.Location] = append(locations[r.Location], r.Identity)
@@ -255,7 +255,7 @@ func (m *Manager) InvokeMethodOneWay(ctx context.Context, sender grain.Identity,
 			combinedErrors = errors.CombineErrors(combinedErrors, err)
 			continue
 		}
-		if err := t.internal.transport.EnqueueInvokeOneWayMethodRequest(ctx, sender, rs, grainType, name, payload); err != nil {
+		if err := t.internal.transport.EnqueueInvokeOneWayMethodRequest(ctx, sender, rs, name, payload); err != nil {
 			combinedErrors = errors.CombineErrors(combinedErrors, err)
 		}
 	}

@@ -13,9 +13,9 @@ type InvokeMethodFutureV2 interface {
 }
 
 type SiloClient interface {
-	InvokeOneWayMethod(ctx context.Context, toIdentity []Identity, grainType string, method string,
+	InvokeOneWayMethod(ctx context.Context, toIdentity []Identity, method string,
 		ser func(Serializer) error)
-	InvokeMethodV2(ctx context.Context, toIdentity Identity, grainType string, method string,
+	InvokeMethodV2(ctx context.Context, toIdentity Identity, method string,
 		ser func(Serializer) error) InvokeMethodFutureV2
 }
 

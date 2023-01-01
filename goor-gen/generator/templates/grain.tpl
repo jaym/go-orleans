@@ -101,6 +101,7 @@ type _{{ $grainType }}Client struct {
 	siloClient __grain.SiloClient
 }
 
+{{ if not .IsObserver }}
 func {{ $grainType }}Ref(siloClient __grain.SiloClient, id string) {{ qualifiedGrainType . }} {
 	return &_{{ $grainType }}Client {
 		siloClient: siloClient,
@@ -108,6 +109,14 @@ func {{ $grainType }}Ref(siloClient __grain.SiloClient, id string) {{ qualifiedG
 			GrainType: "{{ $grainType }}",
 			ID:        id,
 		},
+	}
+}
+{{ end }}
+
+func {{ $grainType }}RefFromIdentity(siloClient __grain.SiloClient, id __grain.Identity) {{ qualifiedGrainType . }} {
+	return &_{{ $grainType }}Client {
+		siloClient: siloClient,
+		Identity: id,
 	}
 }
 
@@ -118,7 +127,7 @@ func (__c *_{{ $grainType }}Client) {{ .Name }}({{ template "methodParameters" .
 	{{- else -}}
 	f := __c.siloClient.InvokeMethodV2(ctx, __c.Identity, 
 	{{- end -}}
-	"{{ $grainType }}", "{{ .Name }}", func(respSerializer __grain.Serializer) error {
+	"{{ .Name }}", func(respSerializer __grain.Serializer) error {
 		{{ template "serializerFuncBody" . }}
 	})
 	{{ if not (isOneWay .) }}
@@ -146,7 +155,7 @@ func (__c *_{{ $grainType }}Client) {{ .Name }}({{ template "methodParameters" .
 				return err
 			}
 
-			out{{ $index }} = {{ qualifiedArgType . }}Ref(s.siloClient, arg{{.Name}}Identity)
+			out{{ $index }} = {{ qualifiedArgType . }}RefFromIdentity(s.siloClient, arg{{.Name}}Identity)
 		{{ else if eq .SerializerType "Interface" }}
 		{{ if .IsPointer }}
 		out{{ $index }} = new({{qualifiedArgType .}})

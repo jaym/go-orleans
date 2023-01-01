@@ -50,7 +50,7 @@ if err != nil {
 	return err
 }
 
-arg{{.Name}} := {{ qualifiedArgType . }}Ref(siloClient, arg{{.Name}}Identity.ID)
+arg{{.Name}} := {{ qualifiedArgType . }}RefFromIdentity(siloClient, arg{{.Name}}Identity)
 {{ else if eq .SerializerType "Interface" }}
 arg{{ .Name }} := new({{qualifiedArgType .}})
 err = dec.Interface(arg{{ .Name }})

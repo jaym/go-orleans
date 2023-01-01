@@ -359,13 +359,13 @@ func (m *GoorMethod) IsOneWay() bool {
 	return len(m.Returns) == 0
 }
 
-type GoorGrainDefinition struct {
-	Name         string
-	Methods      []*GoorMethod
-	IsObservable bool
+type GoorObjectDefinition struct {
+	Name       string
+	IsObserver bool
+	Methods    []*GoorMethod
 }
 
-func (def *GoorGrainDefinition) validate() error {
+func (def *GoorObjectDefinition) validate() error {
 	if def.Name == "" {
 		panic("missing grain name")
 	}
@@ -375,29 +375,28 @@ func (def *GoorGrainDefinition) validate() error {
 			return err
 		}
 	}
+
+	if def.IsObserver {
+		for _, gm := range def.Methods {
+			if !gm.IsOneWay() {
+				return errors.New("observer interfaces only support one way methods")
+			}
+		}
+	}
 	return nil
 }
 
-func (def *GoorGrainDefinition) GetName() string {
+func (def *GoorObjectDefinition) GetName() string {
 	return def.Name
 }
 
-type GoorObserverDefinition struct {
-	Name    string
-	Methods []*GoorMethod
-}
-
-func (def *GoorObserverDefinition) GetName() string {
-	return def.Name
-}
-
-func (l *Loader) createGrainDef(pkg *packages.Package, gi *ast.TypeSpec, observableGrainDef *GoorGrainDefinition, isObservable bool) (*GoorGrainDefinition, error) {
+func (l *Loader) createGrainDef(pkg *packages.Package, gi *ast.TypeSpec, observableGrainDef *GoorObjectDefinition, isObservable bool) (*GoorObjectDefinition, error) {
 	methods, err := l.createMethods(pkg, gi.Type.(*ast.InterfaceType))
 	if err != nil {
 		return nil, err
 	}
 
-	gd := &GoorGrainDefinition{
+	gd := &GoorObjectDefinition{
 		Name:    gi.Name.Name,
 		Methods: methods,
 	}
@@ -413,28 +412,27 @@ func (l *Loader) createGrainDef(pkg *packages.Package, gi *ast.TypeSpec, observa
 	return gd, nil
 }
 
-func (l *Loader) createObserverDef(pkg *packages.Package, gi *ast.TypeSpec) (*GoorObserverDefinition, error) {
+func (l *Loader) createObserverDef(pkg *packages.Package, gi *ast.TypeSpec) (*GoorObjectDefinition, error) {
 	methods, err := l.createMethods(pkg, gi.Type.(*ast.InterfaceType))
 	if err != nil {
 		return nil, err
 	}
 
-	for _, gm := range methods {
-		if !gm.IsOneWay() {
-			return nil, errors.New("observer interfaces only support one way methods")
-		}
+	od := &GoorObjectDefinition{
+		Name:       gi.Name.Name,
+		Methods:    methods,
+		IsObserver: true,
 	}
 
-	od := &GoorObserverDefinition{
-		Name:    gi.Name.Name,
-		Methods: methods,
+	if err := od.validate(); err != nil {
+		return nil, err
 	}
 
 	return od, nil
 }
 
-func (l *Loader) Load() ([]*GoorGrainDefinition, []*GoorObserverDefinition, error) {
-	grainDefs := []*GoorGrainDefinition{}
+func (l *Loader) Load() ([]*GoorObjectDefinition, []*GoorObjectDefinition, error) {
+	grainDefs := []*GoorObjectDefinition{}
 
 	grainInterfaces := l.findGoorInterfaces(l.pkg, "Grain")
 	for _, gi := range grainInterfaces {
@@ -466,7 +464,7 @@ func (l *Loader) Load() ([]*GoorGrainDefinition, []*GoorObserverDefinition, erro
 		grainDefs = append(grainDefs, gd)
 	}
 
-	observerDefs := []*GoorObserverDefinition{}
+	observerDefs := []*GoorObjectDefinition{}
 	observerInterfaces := l.findGoorInterfaces(l.pkg, "Observer")
 	for _, oi := range observerInterfaces {
 		od, err := l.createObserverDef(l.pkg, oi)

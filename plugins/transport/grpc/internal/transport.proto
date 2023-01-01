@@ -26,7 +26,6 @@ message InvokeMethodReq {
 message InvokeOneWayMethodReq {
   GrainIdentity sender = 1;
   repeated GrainIdentity receivers = 2;
-  string grain_type = 3;
   string method_name = 4;
   bytes payload = 5;
 }
