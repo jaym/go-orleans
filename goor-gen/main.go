@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"errors"
+	"flag"
+	"fmt"
 	"go/ast"
+	"go/format"
 	"go/token"
 	"go/types"
 	"os"
@@ -501,7 +505,20 @@ type GoorDefNamed interface {
 }
 
 func main() {
-	l, err := NewLoader(os.Args[1])
+	flagOut := flag.String("out", "", "The file to write the output to. Use '-' for stdout. By default, the file will be written to the current directory.")
+
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [flags] path:\n", os.Args[0])
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	if flag.NArg() != 1 {
+		flag.Usage()
+		os.Exit(2)
+	}
+
+	l, err := NewLoader(flag.Arg(0))
 	if err != nil {
 		panic(err)
 	}
@@ -511,7 +528,8 @@ func main() {
 	}
 
 	if len(grainDefs)+len(observerDefs) == 0 {
-		os.Exit(0)
+		fmt.Fprintf(os.Stderr, "No objects found in %s\n", flag.Arg(0))
+		os.Exit(1)
 	}
 
 	imports := map[string]GoorImport{
@@ -595,7 +613,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	err = t.ExecuteTemplate(os.Stdout, "header.tpl", GoorGoFile{
+
+	buf := bytes.NewBuffer(nil)
+	err = t.ExecuteTemplate(buf, "header.tpl", GoorGoFile{
 		PackageName: l.pkg.Name,
 		Imports:     imports,
 	})
@@ -603,17 +623,37 @@ func main() {
 		panic(err)
 	}
 	for _, grainDef := range grainDefs {
-		err = t.ExecuteTemplate(os.Stdout, "Grain", grainDef)
+		err = t.ExecuteTemplate(buf, "Grain", grainDef)
 		if err != nil {
 			panic(err)
 		}
 	}
 	for _, od := range observerDefs {
-		err = t.ExecuteTemplate(os.Stdout, "Observer", od)
+		err = t.ExecuteTemplate(buf, "Observer", od)
 		if err != nil {
 			panic(err)
 		}
 	}
+
+	outBuf, err := format.Source(buf.Bytes())
+	if err != nil {
+		fmt.Fprint(os.Stderr, "Failed to format output:\n\n")
+		os.Stdout.Write(buf.Bytes())
+		panic(err)
+	}
+
+	if *flagOut == "-" {
+		os.Stdout.Write(outBuf)
+	} else {
+		outPath := *flagOut
+		if outPath == "" {
+			outPath = l.pkg.Name + ".goor.go"
+		}
+		if err := os.WriteFile(outPath, outBuf, 0644); err != nil {
+			panic(err)
+		}
+	}
+
 }
 
 type GoorGoFile struct {
