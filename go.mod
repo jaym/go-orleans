@@ -5,9 +5,8 @@ go 1.18
 require (
 	github.com/benbjohnson/clock v1.3.0
 	github.com/cockroachdb/errors v1.8.6
-	github.com/davecgh/go-spew v1.1.1
 	github.com/fergusstrange/embedded-postgres v1.11.0
-	github.com/go-logr/logr v1.1.0
+	github.com/go-logr/logr v1.2.0
 	github.com/go-logr/stdr v1.1.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang-migrate/migrate/v4 v4.15.1-0.20211015165204-1ba9becc5c8d
@@ -19,7 +18,12 @@ require (
 	github.com/stretchr/testify v1.7.0
 	golang.org/x/tools v0.2.0
 	google.golang.org/grpc v1.41.0
-	google.golang.org/protobuf v1.27.1
+	google.golang.org/protobuf v1.28.0
+)
+
+require (
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4 // indirect
 )
 
 require (

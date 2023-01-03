@@ -1,3 +1,0 @@
-#!/bin/bash
-
-exec go run github.com/jaym/go-orleans/protoc-gen-goor "$@"
