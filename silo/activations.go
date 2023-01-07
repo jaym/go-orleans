@@ -14,7 +14,6 @@ import (
 	"github.com/jaym/go-orleans/grain/generic"
 	"github.com/jaym/go-orleans/silo/internal/activation"
 	"github.com/jaym/go-orleans/silo/services/cluster"
-	"github.com/jaym/go-orleans/silo/services/timer"
 )
 
 type TimerTriggerNotification struct {
@@ -27,8 +26,7 @@ type GrainActivationManagerImpl struct {
 	log                 logr.Logger
 	registrar           descriptor.Registrar
 	siloClient          grain.SiloClient
-	timerService        timer.TimerService
-	grainActivations    map[grain.Identity]*activation.LocalGrainActivation
+	grainActivations    map[grain.Identity]activation.Activation
 	localGrainActivator *activation.LocalGrainActivator
 	grainDirectory      cluster.GrainDirectory
 	grainDirectoryLock  cluster.GrainDirectoryLock
@@ -43,7 +41,6 @@ func NewGrainActivationManager(
 	registrar descriptor.Registrar,
 	nodeName cluster.Location,
 	siloClient grain.SiloClient,
-	timerService timer.TimerService,
 	grainDirectory cluster.GrainDirectory,
 	maxGrains int,
 ) *GrainActivationManagerImpl {
@@ -51,9 +48,8 @@ func NewGrainActivationManager(
 		log:              log,
 		registrar:        registrar,
 		siloClient:       siloClient,
-		timerService:     timerService,
 		nodeName:         nodeName,
-		grainActivations: make(map[grain.Identity]*activation.LocalGrainActivation),
+		grainActivations: make(map[grain.Identity]activation.Activation),
 		grainDirectory:   grainDirectory,
 	}
 	m.resourceManager = activation.NewResourceManager(maxGrains, m.EnqueueEvictGrain)
@@ -87,12 +83,10 @@ func (m *GrainActivationManagerImpl) Start(ctx context.Context) error {
 		m.log,
 		m.registrar,
 		m.siloClient,
-		m.timerService,
 		m.resourceManager,
 		16,
 		deactivateCallback)
 	m.resourceManager.Start()
-	m.timerService.Start()
 	m.serving = true
 
 	return nil
@@ -145,14 +139,6 @@ func (m *GrainActivationManagerImpl) ActivateGenericGrain(g *generic.Grain) erro
 	return nil
 }
 
-func (m *GrainActivationManagerImpl) EnqueueTimerTrigger(req TimerTriggerNotification) error {
-	activation, err := m.getActivation(req.Receiver, false)
-	if err != nil {
-		return err
-	}
-	return activation.NotifyTimer(req.Name)
-}
-
 func (m *GrainActivationManagerImpl) EnqueueEvictGrain(ident grain.Identity, onComplete func(error)) {
 	activation, err := m.getActivation(ident, false)
 	if err != nil {
@@ -173,13 +159,7 @@ func (m *GrainActivationManagerImpl) Stop(ctx context.Context) error {
 	// while trying to stop. Or find an easier way to do this.
 	m.lock.Lock()
 	m.serving = false
-	m.lock.Unlock()
 
-	if errTimer := m.timerService.Stop(ctx); errTimer != nil {
-		err = multierror.Append(err, errTimer)
-	}
-
-	m.lock.Lock()
 	for _, g := range m.grainActivations {
 		g.StopAsync(func(error) {})
 	}
@@ -205,7 +185,7 @@ func (m *GrainActivationManagerImpl) Stop(ctx context.Context) error {
 	return err
 }
 
-func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allowActivation bool) (*activation.LocalGrainActivation, error) {
+func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allowActivation bool) (activation.Activation, error) {
 	if generic.IsGenericGrain(receiver) {
 		allowActivation = false
 	}

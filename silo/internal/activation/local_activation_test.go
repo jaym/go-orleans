@@ -40,11 +40,10 @@ func (noopResourceManager) Remove(grainAddr grain.Identity) error { return nil }
 
 func TestActivationFailsOfUnknownGrainType(t *testing.T) {
 	registrar := &mockRegistrar{entries: map[string]descriptor.ActivatorFunc{}}
-	timerService := mocks.NewTimerService(t)
 	siloClient := mocks.NewSiloClient(t)
 	resourceManager := mocks.NewResourceManager(t)
 	log := logr.Discard()
-	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 8, func(i grain.Identity) {})
+	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, resourceManager, 8, func(i grain.Identity) {})
 	_, err := grainActivator.ActivateGrainWithDefaultActivator(grain.Identity{
 		GrainType: "Mytype",
 		ID:        "Myid",
@@ -67,13 +66,12 @@ func TestActivationGrainActivationNoResources(t *testing.T) {
 	deactivated := false
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	timerService := mocks.NewTimerService(t)
 	siloClient := mocks.NewSiloClient(t)
 	resourceManager := mocks.NewResourceManager(t)
 	resourceManager.On("Touch", mock.Anything).Return(resourcemanager.ErrNoCapacity)
 	log := logr.Discard()
 
-	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 8,
+	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, resourceManager, 8,
 		func(i grain.Identity) {
 			defer wg.Done()
 			assert.Equal(t, grain.Identity{
@@ -115,12 +113,11 @@ func TestActivationGrainActivatorFailure(t *testing.T) {
 	deactivated := false
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	timerService := mocks.NewTimerService(t)
 	siloClient := mocks.NewSiloClient(t)
 	resourceManager := noopResourceManager{}
 	log := logr.Discard()
 
-	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 8,
+	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, resourceManager, 8,
 		func(i grain.Identity) {
 			defer wg.Done()
 			assert.Equal(t, grain.Identity{
@@ -163,12 +160,11 @@ func TestActivationGrainActivatorFailureWithCalls(t *testing.T) {
 	}
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	timerService := mocks.NewTimerService(t)
 	siloClient := mocks.NewSiloClient(t)
 	resourceManager := noopResourceManager{}
 	log := logr.Discard()
 
-	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 8, func(i grain.Identity) {})
+	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, resourceManager, 8, func(i grain.Identity) {})
 	a, err := grainActivator.ActivateGrainWithDefaultActivator(grain.Identity{
 		GrainType: "Mytype",
 		ID:        "Myid",
@@ -213,12 +209,11 @@ func TestActivationGrainMailboxFull(t *testing.T) {
 	}
 	wg := sync.WaitGroup{}
 	wg.Add(2)
-	timerService := mocks.NewTimerService(t)
 	siloClient := mocks.NewSiloClient(t)
 	resourceManager := noopResourceManager{}
 	log := logr.Discard()
 
-	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 1, func(i grain.Identity) {})
+	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, resourceManager, 1, func(i grain.Identity) {})
 	a, err := grainActivator.ActivateGrainWithDefaultActivator(grain.Identity{
 		GrainType: "Mytype",
 		ID:        "Myid",
@@ -284,12 +279,11 @@ func TestActivationGrainEvictionBlockedTest(t *testing.T) {
 	}
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	timerService := mocks.NewTimerService(t)
 	siloClient := mocks.NewSiloClient(t)
 	resourceManager := noopResourceManager{}
 	log := logr.Discard()
 
-	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 2, func(i grain.Identity) {})
+	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, resourceManager, 2, func(i grain.Identity) {})
 	a, err := grainActivator.ActivateGrainWithDefaultActivator(grain.Identity{
 		GrainType: "Mytype",
 		ID:        "Myid",
@@ -363,12 +357,11 @@ func TestActivationGrainDeactivateOnEvict(t *testing.T) {
 	}
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	timerService := mocks.NewTimerService(t)
 	siloClient := mocks.NewSiloClient(t)
 	resourceManager := noopResourceManager{}
 	log := logr.Discard()
 
-	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 2, func(i grain.Identity) {})
+	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, resourceManager, 2, func(i grain.Identity) {})
 	a, err := grainActivator.ActivateGrainWithDefaultActivator(grain.Identity{
 		GrainType: "Mytype",
 		ID:        "Myid",
@@ -410,12 +403,11 @@ func TestActivationGrainDeactivateOnStop(t *testing.T) {
 	}
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	timerService := mocks.NewTimerService(t)
 	siloClient := mocks.NewSiloClient(t)
 	resourceManager := noopResourceManager{}
 	log := logr.Discard()
 
-	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, timerService, resourceManager, 2, func(i grain.Identity) {})
+	grainActivator := NewLocalGrainActivator(log, registrar, siloClient, resourceManager, 2, func(i grain.Identity) {})
 	a, err := grainActivator.ActivateGrainWithDefaultActivator(grain.Identity{
 		GrainType: "Mytype",
 		ID:        "Myid",

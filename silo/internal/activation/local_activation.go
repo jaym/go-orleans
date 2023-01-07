@@ -14,11 +14,9 @@ import (
 	"github.com/jaym/go-orleans/grain/descriptor"
 	"github.com/jaym/go-orleans/grain/generic"
 	"github.com/jaym/go-orleans/silo/services/resourcemanager"
-	"github.com/jaym/go-orleans/silo/services/timer"
 )
 
 var defaultDeactivateTimeout time.Duration = 60 * time.Second
-var defaultGrainTimerTriggerTimeout time.Duration = 30 * time.Second
 var defaultGrainInvocationTimeout time.Duration = 2 * time.Second
 
 type grainActivationMessageType int
@@ -26,7 +24,6 @@ type grainActivationMessageType int
 const (
 	invokeMethodV2 grainActivationMessageType = iota + 1
 	invokeOneWayMethod
-	triggerTimer
 )
 
 type grainActivationInvokeMethodV2 struct {
@@ -45,13 +42,8 @@ type grainActivationInvokeOneWayMethod struct {
 	Deadline time.Time
 }
 
-type grainActivationTriggerTimer struct {
-	Name string
-}
-
 type grainActivationMessage struct {
 	messageType        grainActivationMessageType
-	triggerTimer       *grainActivationTriggerTimer
 	invokeMethodV2     *grainActivationInvokeMethodV2
 	invokeOneWayMethod *grainActivationInvokeOneWayMethod
 }
@@ -69,6 +61,13 @@ const (
 	grainStateDeactivated
 )
 
+type Activation interface {
+	InvokeMethod(sender grain.Identity, method string, deadline time.Time, dec grain.Deserializer, ser grain.Serializer, resolve func(err error)) error
+	InvokeOneWayMethod(sender grain.Identity, method string, deadline time.Time, dec grain.Deserializer) error
+	EvictAsync(onComplete func(err error))
+	StopAsync(onComplete func(error))
+}
+
 type LocalGrainActivation struct {
 	lock       sync.RWMutex
 	grainState grainState
@@ -79,29 +78,28 @@ type LocalGrainActivation struct {
 	identity grain.Identity
 	// description       *descriptor.GrainDescription
 	activator         descriptor.ActivatorFunc
-	grainTimerService *grainTimerServiceImpl
+	grainTimerService *grainTimer
 	grainActivator    *LocalGrainActivator
 }
 
 type LocalGrainActivator struct {
-	log                logr.Logger
-	registrar          descriptor.Registrar
-	siloClient         grain.SiloClient
-	timerService       timer.TimerService
+	log        logr.Logger
+	registrar  descriptor.Registrar
+	siloClient grain.SiloClient
+	// timerService       timer.TimerService
 	resourceManager    resourcemanager.ResourceManager
 	defaultMailboxSize int
 	deactivateCallback func(grain.Identity)
 }
 
 func NewLocalGrainActivator(log logr.Logger, registrar descriptor.Registrar, siloClient grain.SiloClient,
-	timerService timer.TimerService, resourceManager resourcemanager.ResourceManager,
-	defaultMailboxSize int,
+	resourceManager resourcemanager.ResourceManager, defaultMailboxSize int,
 	deactivateCallback func(grain.Identity)) *LocalGrainActivator {
 	return &LocalGrainActivator{
-		log:                log,
-		registrar:          registrar,
-		siloClient:         siloClient,
-		timerService:       timerService,
+		log:        log,
+		registrar:  registrar,
+		siloClient: siloClient,
+		// timerService:       timerService,
 		resourceManager:    resourceManager,
 		defaultMailboxSize: defaultMailboxSize,
 		deactivateCallback: deactivateCallback,
@@ -117,7 +115,7 @@ func (m *LocalGrainActivator) ActivateGrainWithDefaultActivator(identity grain.I
 	return m.activateGrain(identity, activatorFunc)
 }
 
-func (m *LocalGrainActivator) ActivateGenericGrain(g *generic.Grain) (*LocalGrainActivation, error) {
+func (m *LocalGrainActivator) ActivateGenericGrain(g *generic.Grain) (Activation, error) {
 	return m.activateGrain(g.GetIdentity(), g.Activate)
 }
 
@@ -148,12 +146,8 @@ func (l *LocalGrainActivation) start() {
 }
 
 func (l *LocalGrainActivation) loop(ctx context.Context) {
-	l.grainTimerService = &grainTimerServiceImpl{
-		grainIdentity: l.identity,
-		timerService:  l.grainActivator.timerService,
-		timers:        map[string]timerInfo{},
-	}
-	defer l.grainTimerService.Destroy()
+	l.grainTimerService = newGrainTimer()
+	defer l.grainTimerService.destroy()
 
 	coreServices := &coreGrainService{
 		grainTimerServices: l.grainTimerService,
@@ -188,6 +182,8 @@ LOOP:
 			if l.evict(ctx, activation, req.mustStop, req.onComplete) {
 				break LOOP
 			}
+		case <-l.grainTimerService.t.C:
+			l.grainTimerService.triggerDue(ctx)
 		case msg := <-l.inbox:
 			l.processMessage(ctx, activation, msg)
 		}
@@ -263,11 +259,6 @@ func (l *LocalGrainActivation) processMessage(ctx context.Context, activation gr
 		if err != nil {
 			l.log.Error(err, "failed to invoke one way method", "identity", l.identity, "method", req.Method)
 		}
-	case triggerTimer:
-		req := msg.triggerTimer
-		ctx, cancel := context.WithTimeout(ctx, defaultGrainTimerTriggerTimeout)
-		defer cancel()
-		l.grainTimerService.Trigger(ctx, req.Name)
 	}
 }
 
@@ -312,15 +303,6 @@ func (l *LocalGrainActivation) InvokeOneWayMethod(sender grain.Identity, method 
 			Method:   method,
 			Dec:      dec,
 			Deadline: deadline,
-		},
-	})
-}
-
-func (l *LocalGrainActivation) NotifyTimer(name string) error {
-	return l.pushInbox(grainActivationMessage{
-		messageType: triggerTimer,
-		triggerTimer: &grainActivationTriggerTimer{
-			Name: name,
 		},
 	})
 }

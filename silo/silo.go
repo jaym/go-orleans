@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/benbjohnson/clock"
-	"github.com/cockroachdb/errors"
 	"github.com/go-logr/logr"
 	"github.com/hashicorp/go-multierror"
 
@@ -15,14 +14,12 @@ import (
 	"github.com/jaym/go-orleans/plugins/codec"
 	"github.com/jaym/go-orleans/silo/internal/transport"
 	"github.com/jaym/go-orleans/silo/services/cluster"
-	"github.com/jaym/go-orleans/silo/services/timer"
 )
 
 type Silo struct {
 	descriptor.Registrar
 	localGrainManager  *GrainActivationManagerImpl
 	client             *siloClientImpl
-	timerService       timer.TimerService
 	log                logr.Logger
 	nodeName           cluster.Location
 	grainDirectory     cluster.GrainDirectory
@@ -63,33 +60,12 @@ func NewSilo(log logr.Logger, opts ...SiloOption) *Silo {
 		nodeName:       s.nodeName,
 		grainDirectory: s.grainDirectory,
 	}
-	s.timerService = newTimerServiceImpl(s.log.WithName("timerService"), s.clock, func(grainAddr grain.Identity, name string, try int) bool {
-		err := s.localGrainManager.EnqueueTimerTrigger(TimerTriggerNotification{
-			Receiver: grainAddr,
-			Name:     name,
-		})
-		if err != nil {
-			if !(errors.Is(err, ErrGrainActivationNotFound) || errors.Is(err, ErrGrainDeactivating)) {
-				s.log.V(1).Error(err, "failed to trigger timer notification", "identity", grainAddr, "triggerName", name)
-				if errors.Is(err, ErrInboxFull) {
-					if try < 10 {
-						return true
-					} else {
-						s.log.V(0).Error(err, "failed to trigger too many times", "identity", grainAddr, "triggerName", name, "try", try)
-						return false
-						// TODO: panic grain
-					}
-				}
-			}
-		}
-		return false
-	})
+
 	s.localGrainManager = NewGrainActivationManager(
 		s.log.WithName("activation-manager"),
 		s.Registrar,
 		s.nodeName,
 		s.client,
-		s.timerService,
 		s.grainDirectory,
 		options.maxGrains,
 	)
