@@ -83,10 +83,9 @@ type LocalGrainActivation struct {
 }
 
 type LocalGrainActivator struct {
-	log        logr.Logger
-	registrar  descriptor.Registrar
-	siloClient grain.SiloClient
-	// timerService       timer.TimerService
+	log                logr.Logger
+	registrar          descriptor.Registrar
+	siloClient         grain.SiloClient
 	resourceManager    resourcemanager.ResourceManager
 	defaultMailboxSize int
 	deactivateCallback func(grain.Identity)
@@ -96,10 +95,9 @@ func NewLocalGrainActivator(log logr.Logger, registrar descriptor.Registrar, sil
 	resourceManager resourcemanager.ResourceManager, defaultMailboxSize int,
 	deactivateCallback func(grain.Identity)) *LocalGrainActivator {
 	return &LocalGrainActivator{
-		log:        log,
-		registrar:  registrar,
-		siloClient: siloClient,
-		// timerService:       timerService,
+		log:                log,
+		registrar:          registrar,
+		siloClient:         siloClient,
 		resourceManager:    resourceManager,
 		defaultMailboxSize: defaultMailboxSize,
 		deactivateCallback: deactivateCallback,
