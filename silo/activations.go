@@ -73,7 +73,9 @@ func (m *GrainActivationManagerImpl) Start(ctx context.Context) error {
 		if err := m.grainDirectoryLock.Deactivate(context.TODO(), a); err != nil {
 			m.log.Error(err, "failed to deactivate grain", "grain", a)
 		}
-		m.resourceManager.Remove(a)
+		if err := m.resourceManager.Remove(a); err != nil {
+			m.log.Error(err, "failed to remove grain from resource manager", "grain", a)
+		}
 		m.lock.Lock()
 		defer m.lock.Unlock()
 		delete(m.grainActivations, a)

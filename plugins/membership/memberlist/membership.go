@@ -85,7 +85,10 @@ func (m *MembershipProtocol) Start(ctx context.Context, d cluster.MembershipDele
 						continue
 					}
 					nodeMeta := nodeMetadata{}
-					json.Unmarshal(ev.Node.Meta, &nodeMeta)
+					if err := json.Unmarshal(ev.Node.Meta, &nodeMeta); err != nil {
+						m.log.V(0).Error(err, "node joined with invalid metadata", "joining_node", ev.Node.Name)
+						continue
+					}
 					m.log.V(1).Info("node joined", "node", ev.Node.Name, "addr", ev.Node.Addr, "port", ev.Node.Port,
 						"metadata", nodeMeta, "state", ev.Node.State)
 					d.NotifyJoin(cluster.Node{
