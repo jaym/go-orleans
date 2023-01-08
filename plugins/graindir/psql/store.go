@@ -57,7 +57,9 @@ func (s *PSQLStore) withTx(ctx context.Context, f func(*internal.Queries) error)
 	}
 	q := s.q.WithTx(tx)
 	if err := f(q); err != nil {
-		tx.Rollback(ctx)
+		if errRollback := tx.Rollback(ctx); errRollback != nil {
+			s.log.Error(err, "failed to roll back transaction")
+		}
 		return err
 	}
 	return tx.Commit(ctx)
