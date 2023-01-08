@@ -19,3 +19,8 @@ type ObservableGrain interface {
 type Observer interface {
 	grain.GrainReference
 }
+
+// StatelessGrain is a grain that holds no state. It is always dispatched locally.
+type StatelessGrain interface {
+	grain.GrainReference
+}

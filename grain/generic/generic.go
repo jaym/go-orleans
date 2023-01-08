@@ -67,7 +67,7 @@ func NewGrain(location string, client grain.SiloClient) *Grain {
 }
 
 func (s *Grain) Activate(ctx context.Context, identity grain.Identity, services services.CoreGrainServices) (grain.Activation, error) {
-	err := services.TimerService().RegisterTicker(refreshObservablesTickerName, 10*time.Second, func(ctx context.Context) {
+	services.TimerService().RegisterTicker(refreshObservablesTickerName, 10*time.Second, func(ctx context.Context) {
 		s.lock.Lock()
 		defer s.lock.Unlock()
 		fmt.Println("Refreshing observables")
@@ -85,9 +85,6 @@ func (s *Grain) Activate(ctx context.Context, identity grain.Identity, services 
 		}
 
 	})
-	if err != nil {
-		return nil, err
-	}
 	return s, nil
 }
 

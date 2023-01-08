@@ -115,7 +115,7 @@ func (g *grainTimer) reinitTimer(deadline time.Time, d time.Duration) {
 	}
 }
 
-func (g *grainTimer) RegisterTimer(name string, d time.Duration, f func(ctx context.Context)) error {
+func (g *grainTimer) RegisterTimer(name string, d time.Duration, f func(ctx context.Context)) {
 	deadline := nowProvider().Add(d)
 	g.reinitTimer(deadline, d)
 	instance := ksuid.New().String()
@@ -133,11 +133,9 @@ func (g *grainTimer) RegisterTimer(name string, d time.Duration, f func(ctx cont
 		duration: d,
 		f:        f,
 	}
-
-	return nil
 }
 
-func (g *grainTimer) RegisterTicker(name string, d time.Duration, f func(ctx context.Context)) error {
+func (g *grainTimer) RegisterTicker(name string, d time.Duration, f func(ctx context.Context)) {
 	deadline := nowProvider().Add(d)
 	g.reinitTimer(deadline, d)
 
@@ -156,7 +154,6 @@ func (g *grainTimer) RegisterTicker(name string, d time.Duration, f func(ctx con
 		duration: d,
 		f:        f,
 	}
-	return nil
 }
 
 func (g *grainTimer) Cancel(name string) bool {
