@@ -138,13 +138,30 @@ func (l *Loader) findGoorInterfaces(pkg *packages.Package, implementsType string
 	})
 }
 
+func (l *Loader) findInterface(pkg *packages.Package, typeName string) *ast.TypeSpec {
+
+	for _, astFile := range pkg.Syntax {
+		o, ok := astFile.Scope.Objects[typeName]
+		if !ok {
+			continue
+		}
+		t, ok := o.Decl.(*ast.TypeSpec)
+		if !ok {
+			panic("unable to cast to ast.TypeSpec")
+		}
+
+		return t
+	}
+	return nil
+}
+
 func (l *Loader) isGrainInterface(named *types.Named) bool {
 	tn := named.Obj()
 	if !tn.Exported() {
 		return false
 	}
 	if tn.Pkg() == l.goorGenPkg.Types {
-		if tn.Name() == "Grain" || tn.Name() == "ObservableGrain" {
+		if tn.Name() == "Grain" || tn.Name() == "ObservableGrain" || tn.Name() == "StatelessWorkerGrain" {
 			return true
 		}
 	}
@@ -423,9 +440,10 @@ func (m *GoorMethod) IsOneWay() bool {
 }
 
 type GoorObjectDefinition struct {
-	Name       string
-	IsObserver bool
-	Methods    []*GoorMethod
+	Name              string
+	IsObserver        bool
+	IsStatelessWorker bool
+	Methods           []*GoorMethod
 }
 
 func (def *GoorObjectDefinition) validate() error {
@@ -453,15 +471,17 @@ func (def *GoorObjectDefinition) GetName() string {
 	return def.Name
 }
 
-func (l *Loader) createGrainDef(pkg *packages.Package, gi *ast.TypeSpec, observableGrainDef *GoorObjectDefinition, isObservable bool) (*GoorObjectDefinition, error) {
+func (l *Loader) createGrainDef(pkg *packages.Package, gi *ast.TypeSpec, observableGrainDef *GoorObjectDefinition,
+	isObservable bool, isStatelessWorker bool) (*GoorObjectDefinition, error) {
 	methods, err := l.createMethods(pkg, gi.Type.(*ast.InterfaceType))
 	if err != nil {
 		return nil, err
 	}
 
 	gd := &GoorObjectDefinition{
-		Name:    gi.Name.Name,
-		Methods: methods,
+		Name:              gi.Name.Name,
+		Methods:           methods,
+		IsStatelessWorker: isStatelessWorker,
 	}
 
 	if isObservable {
@@ -499,7 +519,7 @@ func (l *Loader) Load() ([]*GoorObjectDefinition, []*GoorObjectDefinition, error
 
 	grainInterfaces := l.findGoorInterfaces(l.pkg, "Grain")
 	for _, gi := range grainInterfaces {
-		gd, err := l.createGrainDef(l.pkg, gi, nil, false)
+		gd, err := l.createGrainDef(l.pkg, gi, nil, false, false)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -507,19 +527,25 @@ func (l *Loader) Load() ([]*GoorObjectDefinition, []*GoorObjectDefinition, error
 		grainDefs = append(grainDefs, gd)
 	}
 
-	observableGrains := l.findGoorInterfaces(l.goorGenPkg, "Grain")
-	if len(observableGrains) != 1 {
-		panic(len(observableGrains))
+	statelessGrainInterfaces := l.findGoorInterfaces(l.pkg, "StatelessWorkerGrain")
+	for _, gi := range statelessGrainInterfaces {
+		gd, err := l.createGrainDef(l.pkg, gi, nil, false, true)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		grainDefs = append(grainDefs, gd)
 	}
-	observableGrain := observableGrains[0]
-	observableGrainDef, err := l.createGrainDef(l.goorGenPkg, observableGrain, nil, false)
+
+	observableGrain := l.findInterface(l.goorGenPkg, "ObservableGrain")
+	observableGrainDef, err := l.createGrainDef(l.goorGenPkg, observableGrain, nil, false, false)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	grainInterfaces = l.findGoorInterfaces(l.pkg, "ObservableGrain")
 	for _, gi := range grainInterfaces {
-		gd, err := l.createGrainDef(l.pkg, gi, observableGrainDef, true)
+		gd, err := l.createGrainDef(l.pkg, gi, observableGrainDef, true, false)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -8,23 +8,29 @@ import (
 var ErrImplementationNotFound = errors.New("no implementation for grainType")
 
 type registrarEntryV2 struct {
-	ActivatorFunc descriptor.ActivatorFunc
+	ActivatorConfig descriptor.ActivatorConfig
 }
 
 type registrarImpl struct {
 	entriesV2 map[string]registrarEntryV2
 }
 
-func (r *registrarImpl) RegisterV2(grainType string, activatorFunc descriptor.ActivatorFunc) {
-	r.entriesV2[grainType] = registrarEntryV2{
+func (r *registrarImpl) Register(grainType string, activatorFunc descriptor.ActivatorFunc, opts ...descriptor.ActivatorOpt) {
+	c := descriptor.ActivatorConfig{
 		ActivatorFunc: activatorFunc,
+	}
+	for _, o := range opts {
+		o(&c)
+	}
+	r.entriesV2[grainType] = registrarEntryV2{
+		ActivatorConfig: c,
 	}
 }
 
-func (r *registrarImpl) LookupV2(grainType string) (descriptor.ActivatorFunc, error) {
+func (r *registrarImpl) Lookup(grainType string) (descriptor.ActivatorConfig, error) {
 	e, ok := r.entriesV2[grainType]
 	if !ok {
-		return nil, errors.WithDetailf(ErrImplementationNotFound, "an implementation must be registerd for %s", grainType)
+		return descriptor.ActivatorConfig{}, errors.WithDetailf(ErrImplementationNotFound, "an implementation must be registerd for %s", grainType)
 	}
-	return e.ActivatorFunc, nil
+	return e.ActivatorConfig, nil
 }

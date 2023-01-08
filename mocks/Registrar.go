@@ -12,17 +12,15 @@ type Registrar struct {
 	mock.Mock
 }
 
-// LookupV2 provides a mock function with given fields: grainType
-func (_m *Registrar) LookupV2(grainType string) (descriptor.ActivatorFunc, error) {
+// Lookup provides a mock function with given fields: grainType
+func (_m *Registrar) Lookup(grainType string) (descriptor.ActivatorConfig, error) {
 	ret := _m.Called(grainType)
 
-	var r0 descriptor.ActivatorFunc
-	if rf, ok := ret.Get(0).(func(string) descriptor.ActivatorFunc); ok {
+	var r0 descriptor.ActivatorConfig
+	if rf, ok := ret.Get(0).(func(string) descriptor.ActivatorConfig); ok {
 		r0 = rf(grainType)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(descriptor.ActivatorFunc)
-		}
+		r0 = ret.Get(0).(descriptor.ActivatorConfig)
 	}
 
 	var r1 error
@@ -35,9 +33,16 @@ func (_m *Registrar) LookupV2(grainType string) (descriptor.ActivatorFunc, error
 	return r0, r1
 }
 
-// RegisterV2 provides a mock function with given fields: grainType, activatorFunc
-func (_m *Registrar) RegisterV2(grainType string, activatorFunc descriptor.ActivatorFunc) {
-	_m.Called(grainType, activatorFunc)
+// Register provides a mock function with given fields: grainType, activatorFunc, opts
+func (_m *Registrar) Register(grainType string, activatorFunc descriptor.ActivatorFunc, opts ...descriptor.ActivatorOpt) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, grainType, activatorFunc)
+	_ca = append(_ca, _va...)
+	_m.Called(_ca...)
 }
 
 type mockConstructorTestingTNewRegistrar interface {

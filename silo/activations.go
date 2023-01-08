@@ -191,6 +191,10 @@ func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allo
 	if generic.IsGenericGrain(receiver) {
 		allowActivation = false
 	}
+	localOnly := false
+	if ac, err := m.registrar.Lookup(receiver.GrainType); err == nil {
+		localOnly = ac.IsStatelessWorker
+	}
 
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -201,9 +205,11 @@ func (m *GrainActivationManagerImpl) getActivation(receiver grain.Identity, allo
 	if !ok {
 		if allowActivation {
 			var err error
-			// TODO: doing an RPC while holding the lock sucks. Maybe there's a better way to do this
-			if err = m.grainDirectoryLock.Activate(context.TODO(), receiver); err != nil {
-				return nil, err
+			if !localOnly {
+				// TODO: doing an RPC while holding the lock sucks. Maybe there's a better way to do this
+				if err = m.grainDirectoryLock.Activate(context.TODO(), receiver); err != nil {
+					return nil, err
+				}
 			}
 			m.wg.Add(1)
 			a, err = m.localGrainActivator.ActivateGrainWithDefaultActivator(receiver)

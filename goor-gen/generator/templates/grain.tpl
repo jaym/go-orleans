@@ -16,8 +16,14 @@ type {{ .Name }}Activator interface {
 	Activate(ctx context.Context, identity __grain.Identity, services __services.CoreGrainServices) ({{ qualifiedGrainType . }}, error)
 }
 
-func Register{{ .Name }}Activator(registrar __descriptor.Registrar, activator {{ .Name }}Activator) {
-	registrar.RegisterV2(
+func Register{{ .Name }}Activator(registrar __descriptor.Registrar, activator {{ .Name }}Activator, opts ...__descriptor.ActivatorOpt) {
+	newOpts := []__descriptor.ActivatorOpt{}
+	{{ if .IsStatelessWorker }}
+	newOpts = append(newOpts, __descriptor.WithDefaultMailboxSize(0), __descriptor.WithStatelessWorker())
+	{{ end }}
+	newOpts = append(newOpts, opts...)
+
+	registrar.Register(
 		"{{ .Name }}",
 		func(ctx context.Context, identity __grain.Identity,
 			services __services.CoreGrainServices) (__grain.Activation, error) {
@@ -27,6 +33,7 @@ func Register{{ .Name }}Activator(registrar __descriptor.Registrar, activator {{
 			}
 			return New{{ .Name }}Activation(services.SiloClient(), a), nil
 		},
+		newOpts...,
 	)
 }
 {{ end }}

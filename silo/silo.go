@@ -59,6 +59,7 @@ func NewSilo(log logr.Logger, opts ...SiloOption) *Silo {
 		codecV2:        codec.NewBasicCodec(),
 		nodeName:       s.nodeName,
 		grainDirectory: s.grainDirectory,
+		registrar:      s.Registrar,
 	}
 
 	s.localGrainManager = NewGrainActivationManager(

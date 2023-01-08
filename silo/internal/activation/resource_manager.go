@@ -264,3 +264,8 @@ func (r *ResourceManager) remove(grainAddr grain.Identity) {
 		r.retryList = r.retryList[:len(r.retryList)-1]
 	}
 }
+
+type noopResourceManager struct{}
+
+func (noopResourceManager) Touch(grainAddr grain.Identity) error  { return nil }
+func (noopResourceManager) Remove(grainAddr grain.Identity) error { return nil }

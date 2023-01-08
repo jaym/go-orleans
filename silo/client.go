@@ -7,6 +7,7 @@ import (
 	"github.com/go-logr/logr"
 	gcontext "github.com/jaym/go-orleans/context"
 	"github.com/jaym/go-orleans/grain"
+	"github.com/jaym/go-orleans/grain/descriptor"
 	"github.com/jaym/go-orleans/grain/generic"
 	"github.com/jaym/go-orleans/plugins/codec"
 	"github.com/jaym/go-orleans/silo/internal/transport"
@@ -20,6 +21,7 @@ type siloClientImpl struct {
 	transportManager *transport.Manager
 	nodeName         cluster.Location
 	grainDirectory   cluster.GrainDirectory
+	registrar        descriptor.Registrar
 }
 
 func (s *siloClientImpl) getGrainAddress(ctx context.Context, ident grain.Identity) (cluster.GrainAddress, error) {
@@ -30,6 +32,16 @@ func (s *siloClientImpl) getGrainAddress(ctx context.Context, ident grain.Identi
 		}
 		return cluster.GrainAddress{
 			Location: cluster.Location(location),
+			Identity: ident,
+		}, nil
+	}
+	ac, err := s.registrar.Lookup(ident.GrainType)
+	if err != nil {
+		return cluster.GrainAddress{}, err
+	}
+	if ac.IsStatelessWorker {
+		return cluster.GrainAddress{
+			Location: cluster.Location(s.nodeName),
 			Identity: ident,
 		}, nil
 	}

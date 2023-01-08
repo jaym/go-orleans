@@ -16,6 +16,10 @@ type ObservableGrain interface {
 	RefreshObserver(context.Context, grain.ObserverRegistrationToken) (grain.ObserverRegistrationToken, error)
 }
 
+type StatelessWorkerGrain interface {
+	Grain
+}
+
 type Observer interface {
 	grain.GrainReference
 }

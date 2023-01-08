@@ -53,10 +53,10 @@ type grainActivationEvict struct {
 	onComplete func(error)
 }
 
-type grainState int
+type GrainState int
 
 const (
-	grainStateRun grainState = iota
+	grainStateRun GrainState = iota
 	grainStateDeactivating
 	grainStateDeactivated
 )
@@ -66,20 +66,22 @@ type Activation interface {
 	InvokeOneWayMethod(sender grain.Identity, method string, deadline time.Time, dec grain.Deserializer) error
 	EvictAsync(onComplete func(err error))
 	StopAsync(onComplete func(error))
+	State() GrainState
 }
 
 type LocalGrainActivation struct {
 	lock       sync.RWMutex
-	grainState grainState
+	grainState GrainState
 	evictChan  chan grainActivationEvict
 	inbox      chan grainActivationMessage
 
-	log      logr.Logger
-	identity grain.Identity
-	// description       *descriptor.GrainDescription
-	activator         descriptor.ActivatorFunc
-	grainTimerService *grainTimer
-	grainActivator    *LocalGrainActivator
+	log                logr.Logger
+	siloClient         grain.SiloClient
+	resourceManager    resourcemanager.ResourceManager
+	deactivateCallback func(grain.Identity)
+	identity           grain.Identity
+	activator          descriptor.ActivatorFunc
+	grainTimerService  *grainTimer
 }
 
 type LocalGrainActivator struct {
@@ -104,28 +106,44 @@ func NewLocalGrainActivator(log logr.Logger, registrar descriptor.Registrar, sil
 	}
 }
 
-func (m *LocalGrainActivator) ActivateGrainWithDefaultActivator(identity grain.Identity) (*LocalGrainActivation, error) {
-	activatorFunc, err := m.registrar.LookupV2(identity.GrainType)
+func (m *LocalGrainActivator) ActivateGrainWithDefaultActivator(identity grain.Identity) (Activation, error) {
+	activatorConfig, err := m.registrar.Lookup(identity.GrainType)
 	if err != nil {
 		return nil, err
 	}
-
-	return m.activateGrain(identity, activatorFunc)
+	if activatorConfig.IsStatelessWorker {
+		return NewStatelessGrainActivation(
+			m.log.WithName("grain").WithValues("type", identity.GrainType, "id", identity.ID),
+			identity,
+			activatorConfig,
+			m.deactivateCallback,
+			func(identity grain.Identity, activatorConfig descriptor.ActivatorConfig, deactivateFunc func(grain.Identity)) (Activation, error) {
+				return m.activateGrain(identity, activatorConfig.ActivatorFunc, activatorConfig.DefaultMailboxSize, noopResourceManager{}, func(i grain.Identity) {})
+			},
+		), nil
+	}
+	return m.activateGrain(identity, activatorConfig.ActivatorFunc, activatorConfig.DefaultMailboxSize, m.resourceManager, m.deactivateCallback)
 }
 
 func (m *LocalGrainActivator) ActivateGenericGrain(g *generic.Grain) (Activation, error) {
-	return m.activateGrain(g.GetIdentity(), g.Activate)
+	return m.activateGrain(g.GetIdentity(), g.Activate, nil, m.resourceManager, m.deactivateCallback)
 }
 
-func (m *LocalGrainActivator) activateGrain(identity grain.Identity, activatorFunc descriptor.ActivatorFunc) (*LocalGrainActivation, error) {
+func (m *LocalGrainActivator) activateGrain(identity grain.Identity, activatorFunc descriptor.ActivatorFunc, defaultMailboxSize *int,
+	resourceManager resourcemanager.ResourceManager, deactivateCallback func(grain.Identity)) (Activation, error) {
+	mailboxSize := m.defaultMailboxSize
+	if defaultMailboxSize != nil {
+		mailboxSize = *defaultMailboxSize
+	}
 	l := &LocalGrainActivation{
-		log:      m.log.WithName("grain").WithValues("type", identity.GrainType, "id", identity.ID),
-		identity: identity,
-		// description:    grainDesc,
-		activator:      activatorFunc,
-		inbox:          make(chan grainActivationMessage, m.defaultMailboxSize),
-		evictChan:      make(chan grainActivationEvict, 1),
-		grainActivator: m,
+		log:                m.log.WithName("grain").WithValues("type", identity.GrainType, "id", identity.ID),
+		identity:           identity,
+		siloClient:         m.siloClient,
+		resourceManager:    resourceManager,
+		deactivateCallback: deactivateCallback,
+		activator:          activatorFunc,
+		inbox:              make(chan grainActivationMessage, mailboxSize),
+		evictChan:          make(chan grainActivationEvict, 1),
 	}
 	l.start()
 	return l, nil
@@ -149,10 +167,10 @@ func (l *LocalGrainActivation) loop(ctx context.Context) {
 
 	coreServices := &coreGrainService{
 		grainTimerServices: l.grainTimerService,
-		siloClient:         l.grainActivator.siloClient,
+		siloClient:         l.siloClient,
 	}
 
-	if err := l.grainActivator.resourceManager.Touch(l.identity); err != nil {
+	if err := l.resourceManager.Touch(l.identity); err != nil {
 		l.setStateDeactivating()
 		l.shutdown(ctx, resourcemanager.ErrNoCapacity)
 		return
@@ -186,6 +204,12 @@ LOOP:
 			l.processMessage(ctx, activation, msg)
 		}
 	}
+}
+
+func (l *LocalGrainActivation) State() GrainState {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	return l.grainState
 }
 
 func (l *LocalGrainActivation) setStateDeactivating() {
@@ -226,7 +250,7 @@ func (l *LocalGrainActivation) evict(ctx context.Context, activation grain.Activ
 func (l *LocalGrainActivation) processMessage(ctx context.Context, activation grain.Activation, msg grainActivationMessage) {
 	switch msg.messageType {
 	case invokeMethodV2:
-		if err := l.grainActivator.resourceManager.Touch(l.identity); err != nil {
+		if err := l.resourceManager.Touch(l.identity); err != nil {
 			l.log.Error(err, "failed to touch")
 		}
 		req := msg.invokeMethodV2
@@ -269,7 +293,7 @@ func (l *LocalGrainActivation) shutdown(ctx context.Context, err error) {
 		}
 	}
 
-	l.grainActivator.deactivateCallback(l.identity)
+	l.deactivateCallback(l.identity)
 
 	for msg := range l.evictChan {
 		msg.onComplete(nil)
