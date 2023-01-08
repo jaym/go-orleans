@@ -14,8 +14,6 @@ import (
 	"github.com/jaym/go-orleans/grain/services"
 )
 
-type decoderFunc = func(in interface{}) error
-
 var (
 	ErrStreamInboxFull             = errors.New("stream inbox full")
 	ErrObservableAlreadyRegistered = errors.New("observable already registered")
